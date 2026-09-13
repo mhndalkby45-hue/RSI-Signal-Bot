@@ -105,6 +105,7 @@ def generate_signal(df):
     return "WAIT"
 
 
+
 def main():
 
     print("=" * 50)
@@ -115,25 +116,30 @@ def main():
     print("Bot started:", datetime.now())
     print()
 
- try:
+    try:
+        df = get_market_data()
+        df = calculate_indicators(df)
 
-            df = get_market_data()
-            df = calculate_indicators(df)
+        signal = generate_signal(df)
+        current = df.iloc[-1]
 
-            signal = generate_signal(df)
-            current = df.iloc[-1]
+        print("-" * 50)
+        print("Time:", datetime.now())
+        print("Price:", round(current["close"], 4))
+        print("EMA 9:", round(current["ema9"], 4))
+        print("EMA 21:", round(current["ema21"], 4))
+        print("RSI:", round(current["rsi"], 2))
+        print("MACD:", round(current["macd"], 5))
+        print("MACD Signal:", round(current["macd_signal"], 5))
+        print("SIGNAL:", signal)
 
-            print("-" * 50)
-            print("Time:", datetime.now())
-            print("Price:", round(current["close"], 4))
-            print("EMA 9:", round(current["ema9"], 4))
-            print("EMA 21:", round(current["ema21"], 4))
-            print("RSI:", round(current["rsi"], 2))
-            print("MACD:", round(current["macd"], 5))
-            print("MACD Signal:", round(current["macd_signal"], 5))
-            print("SIGNAL:", signal)
-except Exception as e:
-            print("ERROR:", e)
+    except Exception as e:
+        print("ERROR:", e)
+
+
+if __name__ == "__main__":
+    main()
+
 
         
 
