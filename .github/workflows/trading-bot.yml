@@ -29,4 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python smart_bot.py
+        
+run: python Smart-bot.py
