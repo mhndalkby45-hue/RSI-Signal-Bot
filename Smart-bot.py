@@ -115,8 +115,6 @@ def main():
     print("Bot started:", datetime.now())
     print()
 
-    while True:
-
         try:
 
             df = get_market_data()
@@ -138,7 +136,7 @@ def main():
         except Exception as e:
             print("ERROR:", e)
 
-        time.sleep(60)
+        
 
 
 if __name__ == "__main__":
