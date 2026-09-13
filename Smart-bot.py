@@ -115,7 +115,7 @@ def main():
     print("Bot started:", datetime.now())
     print()
 
-        try:
+ try:
 
             df = get_market_data()
             df = calculate_indicators(df)
@@ -132,8 +132,7 @@ def main():
             print("MACD:", round(current["macd"], 5))
             print("MACD Signal:", round(current["macd_signal"], 5))
             print("SIGNAL:", signal)
-
-        except Exception as e:
+except Exception as e:
             print("ERROR:", e)
 
         
