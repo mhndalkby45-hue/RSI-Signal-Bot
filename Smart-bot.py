@@ -1,7 +1,6 @@
 import requests
 import pandas as pd
 import ta
-import time
 from datetime import datetime
 
 BOT_NAME = "Smart Trading Signal Bot"
@@ -12,55 +11,69 @@ CANDLE_LIMIT = 100
 
 
 def get_market_data():
-    url = "https://api.binance.com/api/v3/klines"
+    # CoinGecko لا يوفر شموع 5 دقائق مباشرة،
+    # لذلك نستخدم Kraken كبديل لمصدر بيانات السوق.
+    url = "https://api.kraken.com/0/public/OHLC"
 
     params = {
-        "symbol": SYMBOL,
-        "interval": INTERVAL,
-        "limit": CANDLE_LIMIT
+        "pair": "XBTUSD",
+        "interval": 5
     }
 
-    response = requests.get(url, params=params, timeout=10)
+    response = requests.get(url, params=params, timeout=15)
     response.raise_for_status()
 
     data = response.json()
 
-    df = pd.DataFrame(data, columns=[
+    if data.get("error"):
+        raise Exception("Kraken API error: " + str(data["error"]))
+
+    result = data.get("result", {})
+
+    pair_key = next(
+        (key for key in result.keys() if key != "last"),
+        None
+    )
+
+    if pair_key is None:
+        raise Exception("No market data received")
+
+    candles = result[pair_key]
+
+    df = pd.DataFrame(candles, columns=[
         "time",
         "open",
         "high",
         "low",
         "close",
         "volume",
-        "close_time",
-        "quote_volume",
-        "trades",
-        "buy_volume",
-        "buy_quote_volume",
-        "ignore"
+        "trades"
     ])
 
     df["close"] = pd.to_numeric(df["close"])
     df["high"] = pd.to_numeric(df["high"])
     df["low"] = pd.to_numeric(df["low"])
 
+    df = df.tail(CANDLE_LIMIT).reset_index(drop=True)
+
     return df
 
 
 def calculate_indicators(df):
 
-    # EMA
+    # EMA 9
     df["ema9"] = ta.trend.EMAIndicator(
         close=df["close"],
         window=9
     ).ema_indicator()
 
+    # EMA 21
     df["ema21"] = ta.trend.EMAIndicator(
         close=df["close"],
         window=21
     ).ema_indicator()
 
-    # RSI
+    # RSI 14
     df["rsi"] = ta.momentum.RSIIndicator(
         close=df["close"],
         window=14
@@ -105,7 +118,6 @@ def generate_signal(df):
     return "WAIT"
 
 
-
 def main():
 
     print("=" * 50)
@@ -117,10 +129,18 @@ def main():
     print()
 
     try:
+
         df = get_market_data()
+
+        if len(df) < 30:
+            raise Exception(
+                "Not enough candle data received"
+            )
+
         df = calculate_indicators(df)
 
         signal = generate_signal(df)
+
         current = df.iloc[-1]
 
         print("-" * 50)
@@ -130,18 +150,16 @@ def main():
         print("EMA 21:", round(current["ema21"], 4))
         print("RSI:", round(current["rsi"], 2))
         print("MACD:", round(current["macd"], 5))
-        print("MACD Signal:", round(current["macd_signal"], 5))
+        print(
+            "MACD Signal:",
+            round(current["macd_signal"], 5)
+        )
         print("SIGNAL:", signal)
+        print("-" * 50)
 
     except Exception as e:
+
         print("ERROR:", e)
-
-
-if __name__ == "__main__":
-    main()
-
-
-        
 
 
 if __name__ == "__main__":
