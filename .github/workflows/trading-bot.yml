@@ -29,5 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Analyze-Strategy-V15.py
+        run: python Validate-MACD-V15.py
        
