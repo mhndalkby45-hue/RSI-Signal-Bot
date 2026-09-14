@@ -3,20 +3,38 @@ import pandas as pd
 import ta
 from datetime import datetime
 
+
+# ==================================================
+# SMART TRADING SIGNAL BOT
+# ==================================================
+
 BOT_NAME = "Smart Trading Signal Bot"
 
-SYMBOL = "BTCUSDT"
+# Symbol displayed by the bot
+SYMBOL = "BTCUSD"
+
+# Kraken market
+KRAKEN_PAIR = "XBTUSD"
+
+# Timeframe
 INTERVAL = "5m"
+KRAKEN_INTERVAL = 5
+
+# Number of candles
 CANDLE_LIMIT = 100
 
+
+# ==================================================
+# GET MARKET DATA
+# ==================================================
 
 def get_market_data():
 
     url = "https://api.kraken.com/0/public/OHLC"
 
     params = {
-        "pair": "XBTUSD",
-        "interval": 5
+        "pair": KRAKEN_PAIR,
+        "interval": KRAKEN_INTERVAL
     }
 
     response = requests.get(
@@ -46,27 +64,49 @@ def get_market_data():
 
     candles = result[pair_key]
 
-    # Kraken returns 8 values per candle:
+    # Kraken:
     # time, open, high, low, close, vwap, volume, trades
 
-    df = pd.DataFrame(candles, columns=[
-        "time",
+    df = pd.DataFrame(
+        candles,
+        columns=[
+            "time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "vwap",
+            "volume",
+            "trades"
+        ]
+    )
+
+    # Convert numeric columns
+    numeric_columns = [
         "open",
         "high",
         "low",
         "close",
         "vwap",
-        "volume",
-        "trades"
-    ])
+        "volume"
+    ]
 
-    df["close"] = pd.to_numeric(df["close"])
-    df["high"] = pd.to_numeric(df["high"])
-    df["low"] = pd.to_numeric(df["low"])
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
 
-    df = df.tail(CANDLE_LIMIT).reset_index(drop=True)
+    df = df.dropna().tail(
+        CANDLE_LIMIT
+    ).reset_index(drop=True)
 
     return df
+
+
+# ==================================================
+# CALCULATE INDICATORS
+# ==================================================
 
 def calculate_indicators(df):
 
@@ -97,10 +137,17 @@ def calculate_indicators(df):
     )
 
     df["macd"] = macd.macd()
+
     df["macd_signal"] = macd.macd_signal()
+
+    df["macd_hist"] = macd.macd_diff()
 
     return df
 
+
+# ==================================================
+# GENERATE SIGNAL
+# ==================================================
 
 def generate_signal(df):
 
@@ -108,87 +155,174 @@ def generate_signal(df):
 
     score = 0
 
-    # EMA Trend
+    # ----------------------------------------------
+    # EMA TREND
+    # ----------------------------------------------
+
     if current["ema9"] > current["ema21"]:
         score += 30
+
     elif current["ema9"] < current["ema21"]:
         score -= 30
 
-    # RSI Momentum
+
+    # ----------------------------------------------
+    # RSI MOMENTUM
+    # ----------------------------------------------
+
     if current["rsi"] >= 55:
         score += 25
+
     elif current["rsi"] <= 45:
         score -= 25
 
-    # MACD Confirmation
+
+    # ----------------------------------------------
+    # MACD CONFIRMATION
+    # ----------------------------------------------
+
     if current["macd"] > current["macd_signal"]:
         score += 30
+
     elif current["macd"] < current["macd_signal"]:
         score -= 30
 
-    # RSI extreme protection
+
+    # ----------------------------------------------
+    # RSI EXTREME PROTECTION
+    # ----------------------------------------------
+
     if current["rsi"] >= 70:
         score -= 10
 
-    if current["rsi"] <= 30:
+    elif current["rsi"] <= 30:
         score += 10
 
-    # Final decision
+
+    # ----------------------------------------------
+    # FINAL SIGNAL
+    # ----------------------------------------------
+
     if score >= 60:
         signal = "CALL"
+
     elif score <= -60:
         signal = "PUT"
+
     else:
         signal = "WAIT"
+
 
     confidence = min(abs(score), 100)
 
     return signal, score, confidence
 
 
+# ==================================================
+# MAIN
+# ==================================================
+
 def main():
 
     print("=" * 50)
     print(BOT_NAME)
     print("=" * 50)
+
     print("Symbol:", SYMBOL)
+    print("Market:", KRAKEN_PAIR)
     print("Timeframe:", INTERVAL)
     print("Bot started:", datetime.now())
+
     print()
 
     try:
 
+        # Get market data
         df = get_market_data()
 
         if len(df) < 30:
-            raise Exception("Not enough candle data received")
+            raise Exception(
+                "Not enough candle data received"
+            )
 
+        # Calculate indicators
         df = calculate_indicators(df)
 
+        # Generate signal
         signal, score, confidence = generate_signal(df)
 
         current = df.iloc[-1]
 
         print("-" * 50)
-        print("Time:", datetime.now())
-        print("Price:", round(current["close"], 4))
-        print("EMA 9:", round(current["ema9"], 4))
-        print("EMA 21:", round(current["ema21"], 4))
-        print("RSI:", round(current["rsi"], 2))
-        print("MACD:", round(current["macd"], 5))
-        print("MACD Signal:", round(current["macd_signal"], 5))
-        print("SIGNAL:", signal)
-        print("SCORE:", score)
-        print("CONFIDENCE:", str(confidence) + "%")
+
+        print(
+            "Time:",
+            datetime.now()
+        )
+
+        print(
+            "Price:",
+            round(current["close"], 4)
+        )
+
+        print(
+            "EMA 9:",
+            round(current["ema9"], 4)
+        )
+
+        print(
+            "EMA 21:",
+            round(current["ema21"], 4)
+        )
+
+        print(
+            "RSI:",
+            round(current["rsi"], 2)
+        )
+
+        print(
+            "MACD:",
+            round(current["macd"], 5)
+        )
+
+        print(
+            "MACD Signal:",
+            round(current["macd_signal"], 5)
+        )
+
+        print(
+            "MACD Histogram:",
+            round(current["macd_hist"], 5)
+        )
+
+        print(
+            "SIGNAL:",
+            signal
+        )
+
+        print(
+            "SCORE:",
+            score
+        )
+
+        print(
+            "CONFIDENCE:",
+            str(confidence) + "%"
+        )
+
         print("-" * 50)
 
     except Exception as e:
 
-        print("ERROR:", e)
+        print(
+            "ERROR:",
+            e
+        )
 
 
-if __name__ == "__main__":
-    main()
+# ==================================================
+# START BOT
+# ==================================================
 
 if __name__ == "__main__":
     main()
