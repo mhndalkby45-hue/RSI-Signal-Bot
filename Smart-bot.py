@@ -5,10 +5,10 @@ from datetime import datetime
 
 
 # ==================================================
-# SMART TRADING SIGNAL BOT V2
+# SMART TRADING SIGNAL BOT V3
 # ==================================================
 
-BOT_NAME = "Smart Trading Signal Bot V2"
+BOT_NAME = "Smart Trading Signal Bot V3"
 
 SYMBOL = "BTCUSD"
 KRAKEN_PAIR = "XBTUSD"
@@ -96,7 +96,7 @@ def get_market_data():
 
 
 # ==================================================
-# CALCULATE INDICATORS
+# INDICATORS
 # ==================================================
 
 def calculate_indicators(df):
@@ -140,10 +140,10 @@ def calculate_indicators(df):
 
     df["adx"] = adx.adx()
 
-    # Average volume
+    # Volume average
     df["volume_ma"] = (
         df["volume"]
-        .rolling(window=20)
+        .rolling(20)
         .mean()
     )
 
@@ -151,41 +151,47 @@ def calculate_indicators(df):
 
 
 # ==================================================
-# CANDLE ANALYSIS
+# CANDLE CONFIRMATION
 # ==================================================
 
-def analyze_candle(current):
+def candle_confirmation(current):
 
-    candle_range = current["high"] - current["low"]
+    candle_range = (
+        current["high"] -
+        current["low"]
+    )
 
     if candle_range <= 0:
-        return 0, "NEUTRAL"
+        return "NEUTRAL", 0
 
     body = abs(
-        current["close"] - current["open"]
+        current["close"] -
+        current["open"]
     )
 
     body_ratio = body / candle_range
 
-    # Bullish candle
+    # Strong bullish candle
     if (
-        current["close"] > current["open"]
+        current["close"] >
+        current["open"]
         and body_ratio >= 0.55
     ):
-        return 10, "BULLISH"
+        return "BULLISH", 1
 
-    # Bearish candle
+    # Strong bearish candle
     if (
-        current["close"] < current["open"]
+        current["close"] <
+        current["open"]
         and body_ratio >= 0.55
     ):
-        return -10, "BEARISH"
+        return "BEARISH", -1
 
-    return 0, "NEUTRAL"
+    return "NEUTRAL", 0
 
 
 # ==================================================
-# GENERATE SIGNAL
+# GENERATE SIGNAL V3
 # ==================================================
 
 def generate_signal(df):
@@ -194,172 +200,253 @@ def generate_signal(df):
 
     score = 0
 
+    trend_points = 0
+    momentum_points = 0
+    confirmation_points = 0
+
     reasons = []
 
-    # ----------------------------------------------
-    # 1. EMA TREND
-    # ----------------------------------------------
+    # ==================================================
+    # TREND
+    # ==================================================
 
     if current["ema9"] > current["ema21"]:
 
-        score += 25
+        trend_points += 25
         reasons.append("EMA BULLISH")
 
     elif current["ema9"] < current["ema21"]:
 
-        score -= 25
+        trend_points -= 25
         reasons.append("EMA BEARISH")
 
 
-    # ----------------------------------------------
-    # 2. PRICE VS EMA
-    # ----------------------------------------------
+    # Price position
 
     if current["close"] > current["ema9"]:
 
-        score += 10
+        trend_points += 10
         reasons.append("PRICE ABOVE EMA9")
 
     elif current["close"] < current["ema9"]:
 
-        score -= 10
+        trend_points -= 10
         reasons.append("PRICE BELOW EMA9")
 
 
-    # ----------------------------------------------
-    # 3. RSI
-    # ----------------------------------------------
+    # ADX
+
+    if current["adx"] >= 25:
+
+        reasons.append("ADX STRONG")
+
+        if trend_points > 0:
+            trend_points += 10
+
+        elif trend_points < 0:
+            trend_points -= 10
+
+    else:
+
+        reasons.append("ADX WEAK")
+
+
+    # ==================================================
+    # MOMENTUM
+    # ==================================================
+
+    # RSI
 
     if 55 <= current["rsi"] < 70:
 
-        score += 20
+        momentum_points += 20
         reasons.append("RSI BULLISH")
 
     elif 30 < current["rsi"] <= 45:
 
-        score -= 20
+        momentum_points -= 20
         reasons.append("RSI BEARISH")
 
+    elif current["rsi"] >= 70:
 
-    # Avoid chasing extreme RSI
-    if current["rsi"] >= 70:
-
-        score -= 10
         reasons.append("RSI OVERBOUGHT")
 
     elif current["rsi"] <= 30:
 
-        score += 10
         reasons.append("RSI OVERSOLD")
 
 
-    # ----------------------------------------------
-    # 4. MACD
-    # ----------------------------------------------
+    # MACD
 
     if current["macd"] > current["macd_signal"]:
 
-        score += 20
+        momentum_points += 20
         reasons.append("MACD BULLISH")
 
     elif current["macd"] < current["macd_signal"]:
 
-        score -= 20
+        momentum_points -= 20
         reasons.append("MACD BEARISH")
 
 
-    # ----------------------------------------------
-    # 5. MACD HISTOGRAM
-    # ----------------------------------------------
+    # MACD Histogram
 
     if current["macd_hist"] > 0:
 
-        score += 10
+        momentum_points += 10
         reasons.append("MACD HISTOGRAM POSITIVE")
 
     elif current["macd_hist"] < 0:
 
-        score -= 10
+        momentum_points -= 10
         reasons.append("MACD HISTOGRAM NEGATIVE")
 
 
-    # ----------------------------------------------
-    # 6. ADX TREND STRENGTH
-    # ----------------------------------------------
+    # ==================================================
+    # CANDLE
+    # ==================================================
 
-    if current["adx"] >= 25:
+    candle_type, candle_direction = candle_confirmation(
+        current
+    )
 
-        reasons.append("STRONG TREND")
+    if candle_type == "BULLISH":
 
-        # Strengthens existing direction
-        if score > 0:
-            score += 10
+        confirmation_points += 10
+        reasons.append("BULLISH CANDLE")
 
-        elif score < 0:
-            score -= 10
+    elif candle_type == "BEARISH":
+
+        confirmation_points -= 10
+        reasons.append("BEARISH CANDLE")
 
     else:
 
-        reasons.append("WEAK TREND")
+        reasons.append("NEUTRAL CANDLE")
 
 
-    # ----------------------------------------------
-    # 7. VOLUME CONFIRMATION
-    # ----------------------------------------------
+    # ==================================================
+    # VOLUME
+    # ==================================================
+
+    volume_confirmed = False
 
     if (
         pd.notna(current["volume_ma"])
-        and current["volume"] > current["volume_ma"]
+        and
+        current["volume"] >
+        current["volume_ma"]
     ):
 
+        volume_confirmed = True
         reasons.append("VOLUME CONFIRMED")
 
-        if score > 0:
-            score += 5
+        if trend_points > 0:
+            confirmation_points += 5
 
-        elif score < 0:
-            score -= 5
+        elif trend_points < 0:
+            confirmation_points -= 5
 
     else:
 
         reasons.append("LOW VOLUME")
 
 
-    # ----------------------------------------------
-    # 8. CANDLE CONFIRMATION
-    # ----------------------------------------------
+    # ==================================================
+    # TOTAL SCORE
+    # ==================================================
 
-    candle_score, candle_type = analyze_candle(
-        current
+    score = (
+        trend_points +
+        momentum_points +
+        confirmation_points
     )
 
-    score += candle_score
 
-    if candle_type == "BULLISH":
+    # ==================================================
+    # MARKET QUALITY
+    # ==================================================
 
-        reasons.append("BULLISH CANDLE")
+    if current["adx"] >= 30:
 
-    elif candle_type == "BEARISH":
+        market_quality = "STRONG"
 
-        reasons.append("BEARISH CANDLE")
+    elif current["adx"] >= 20:
 
-
-    # ----------------------------------------------
-    # FINAL DECISION
-    # ----------------------------------------------
-
-    if score >= 65:
-
-        signal = "CALL"
-
-    elif score <= -65:
-
-        signal = "PUT"
+        market_quality = "MODERATE"
 
     else:
 
-        signal = "WAIT"
+        market_quality = "WEAK"
 
+
+    # ==================================================
+    # ALIGNMENT
+    # ==================================================
+
+    bullish_alignment = (
+        trend_points > 0
+        and momentum_points > 0
+    )
+
+    bearish_alignment = (
+        trend_points < 0
+        and momentum_points < 0
+    )
+
+
+    # ==================================================
+    # SIGNAL DECISION
+    # ==================================================
+
+    signal = "WAIT"
+
+    if (
+        score >= 70
+        and bullish_alignment
+        and market_quality != "WEAK"
+    ):
+
+        signal = "CALL"
+
+    elif (
+        score <= -70
+        and bearish_alignment
+        and market_quality != "WEAK"
+    ):
+
+        signal = "PUT"
+
+
+    # ==================================================
+    # SIGNAL QUALITY
+    # ==================================================
+
+    if signal == "WAIT":
+
+        quality = "LOW"
+
+    elif (
+        abs(score) >= 90
+        and market_quality == "STRONG"
+        and volume_confirmed
+        and candle_type != "NEUTRAL"
+    ):
+
+        quality = "HIGH"
+
+    elif abs(score) >= 75:
+
+        quality = "MEDIUM"
+
+    else:
+
+        quality = "LOW"
+
+
+    # ==================================================
+    # CONFIDENCE SCORE
+    # ==================================================
 
     confidence = min(
         int(abs(score)),
@@ -367,28 +454,15 @@ def generate_signal(df):
     )
 
 
-    # ----------------------------------------------
-    # MARKET QUALITY
-    # ----------------------------------------------
-
-    if current["adx"] < 20:
-
-        market_quality = "LOW TREND"
-
-    elif current["adx"] < 25:
-
-        market_quality = "MODERATE"
-
-    else:
-
-        market_quality = "STRONG TREND"
-
-
     return (
         signal,
         score,
         confidence,
+        quality,
         market_quality,
+        trend_points,
+        momentum_points,
+        confirmation_points,
         reasons
     )
 
@@ -399,9 +473,9 @@ def generate_signal(df):
 
 def main():
 
-    print("=" * 55)
+    print("=" * 60)
     print(BOT_NAME)
-    print("=" * 55)
+    print("=" * 60)
 
     print("Symbol:", SYMBOL)
     print("Market:", KRAKEN_PAIR)
@@ -412,7 +486,7 @@ def main():
 
     try:
 
-        # Get data
+        # Get candles
         df = get_market_data()
 
         if len(df) < 50:
@@ -421,21 +495,29 @@ def main():
                 "Not enough candle data received"
             )
 
-        # Indicators
+        # Calculate indicators
         df = calculate_indicators(df)
 
-        # Signal
+        # Generate signal
         (
             signal,
             score,
             confidence,
+            quality,
             market_quality,
+            trend_points,
+            momentum_points,
+            confirmation_points,
             reasons
         ) = generate_signal(df)
 
         current = df.iloc[-1]
 
-        print("-" * 55)
+        # ==================================================
+        # OUTPUT
+        # ==================================================
+
+        print("-" * 60)
 
         print(
             "Time:",
@@ -492,19 +574,41 @@ def main():
             round(current["volume_ma"], 4)
         )
 
+        print()
+
         print(
-            "Market Quality:",
+            "TREND SCORE:",
+            trend_points
+        )
+
+        print(
+            "MOMENTUM SCORE:",
+            momentum_points
+        )
+
+        print(
+            "CONFIRMATION SCORE:",
+            confirmation_points
+        )
+
+        print(
+            "TOTAL SCORE:",
+            score
+        )
+
+        print(
+            "MARKET QUALITY:",
             market_quality
+        )
+
+        print(
+            "SIGNAL QUALITY:",
+            quality
         )
 
         print(
             "SIGNAL:",
             signal
-        )
-
-        print(
-            "SCORE:",
-            score
         )
 
         print(
@@ -520,7 +624,7 @@ def main():
 
             print("-", reason)
 
-        print("-" * 55)
+        print("-" * 60)
 
     except Exception as e:
 
