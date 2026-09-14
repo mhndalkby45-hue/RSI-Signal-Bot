@@ -29,5 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Analyze-V15.py
+        run: python Analyze-Components-V15.py
        
