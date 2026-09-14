@@ -29,5 +29,6 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Validate-MACD-ADX35-CALL-EMA50.py
+        run: python Validate-MACD-ADX35-EMA50-RSI.py
+    
      
