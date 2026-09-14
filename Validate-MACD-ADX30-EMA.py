@@ -1,3 +1,4 @@
+print("TEST: Validate-MACD-ADX30-EMA.py STARTED")
 import requests
 import pandas as pd
 import numpy as np
