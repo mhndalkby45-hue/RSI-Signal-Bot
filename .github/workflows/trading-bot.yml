@@ -29,5 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Validate-MACD-ADX30-Rising.py
-       
+        run: python Validate-MACD-ADX-Thresholds.py
+     
