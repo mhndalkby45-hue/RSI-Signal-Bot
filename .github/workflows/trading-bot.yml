@@ -29,5 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Validate-MACD-ADX30-Histogram.py
+        run: python Validate-MACD-ADX30-Histogram-Rising.py
        
