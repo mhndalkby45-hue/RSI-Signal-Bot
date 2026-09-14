@@ -106,26 +106,44 @@ def generate_signal(df):
 
     current = df.iloc[-1]
 
-    bullish = (
-        current["ema9"] > current["ema21"]
-        and current["rsi"] > 50
-        and current["macd"] > current["macd_signal"]
-    )
+    score = 0
 
-    bearish = (
-        current["ema9"] < current["ema21"]
-        and current["rsi"] < 50
-        and current["macd"] < current["macd_signal"]
-    )
+    # EMA Trend
+    if current["ema9"] > current["ema21"]:
+        score += 30
+    elif current["ema9"] < current["ema21"]:
+        score -= 30
 
-    if bullish:
-        return "CALL"
+    # RSI Momentum
+    if current["rsi"] >= 55:
+        score += 25
+    elif current["rsi"] <= 45:
+        score -= 25
 
-    if bearish:
-        return "PUT"
+    # MACD Confirmation
+    if current["macd"] > current["macd_signal"]:
+        score += 30
+    elif current["macd"] < current["macd_signal"]:
+        score -= 30
 
-    return "WAIT"
+    # RSI extreme protection
+    if current["rsi"] >= 70:
+        score -= 10
 
+    if current["rsi"] <= 30:
+        score += 10
+
+    # Final decision
+    if score >= 60:
+        signal = "CALL"
+    elif score <= -60:
+        signal = "PUT"
+    else:
+        signal = "WAIT"
+
+    confidence = min(abs(score), 100)
+
+    return signal, score, confidence
 
 def main():
 
@@ -148,7 +166,7 @@ def main():
 
         df = calculate_indicators(df)
 
-        signal = generate_signal(df)
+        signal, score, confidence = generate_signal(df)
 
         current = df.iloc[-1]
 
@@ -164,6 +182,8 @@ def main():
             round(current["macd_signal"], 5)
         )
         print("SIGNAL:", signal)
+        print("SCORE:", score)
+print("CONFIDENCE:", str(confidence) + "%")
         print("-" * 50)
 
     except Exception as e:
