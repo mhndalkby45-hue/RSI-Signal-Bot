@@ -29,5 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Backtest-V15.py
+        run: python Analyze-V15.py
        
