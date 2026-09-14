@@ -145,6 +145,7 @@ def generate_signal(df):
 
     return signal, score, confidence
 
+
 def main():
 
     print("=" * 50)
@@ -160,9 +161,7 @@ def main():
         df = get_market_data()
 
         if len(df) < 30:
-            raise Exception(
-                "Not enough candle data received"
-            )
+            raise Exception("Not enough candle data received")
 
         df = calculate_indicators(df)
 
@@ -177,19 +176,19 @@ def main():
         print("EMA 21:", round(current["ema21"], 4))
         print("RSI:", round(current["rsi"], 2))
         print("MACD:", round(current["macd"], 5))
-        print(
-            "MACD Signal:",
-            round(current["macd_signal"], 5)
-        )
+        print("MACD Signal:", round(current["macd_signal"], 5))
         print("SIGNAL:", signal)
         print("SCORE:", score)
-print("CONFIDENCE:", str(confidence) + "%")
+        print("CONFIDENCE:", str(confidence) + "%")
         print("-" * 50)
 
     except Exception as e:
 
         print("ERROR:", e)
 
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
