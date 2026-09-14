@@ -5,10 +5,10 @@ from datetime import datetime
 
 
 # ==================================================
-# SMART TRADING SIGNAL BOT V3
+# SMART TRADING SIGNAL BOT V4
 # ==================================================
 
-BOT_NAME = "Smart Trading Signal Bot V3"
+BOT_NAME = "Smart Trading Signal Bot V4"
 
 SYMBOL = "BTCUSD"
 KRAKEN_PAIR = "XBTUSD"
@@ -96,23 +96,24 @@ def get_market_data():
 
 
 # ==================================================
-# INDICATORS
+# CALCULATE INDICATORS
 # ==================================================
 
 def calculate_indicators(df):
 
-    # EMA
+    # EMA 9
     df["ema9"] = ta.trend.EMAIndicator(
         close=df["close"],
         window=9
     ).ema_indicator()
 
+    # EMA 21
     df["ema21"] = ta.trend.EMAIndicator(
         close=df["close"],
         window=21
     ).ema_indicator()
 
-    # RSI
+    # RSI 14
     df["rsi"] = ta.momentum.RSIIndicator(
         close=df["close"],
         window=14
@@ -130,15 +131,17 @@ def calculate_indicators(df):
     df["macd_signal"] = macd.macd_signal()
     df["macd_hist"] = macd.macd_diff()
 
-    # ADX
-    adx = ta.trend.ADXIndicator(
+    # ADX + DI
+    adx_indicator = ta.trend.ADXIndicator(
         high=df["high"],
         low=df["low"],
         close=df["close"],
         window=14
     )
 
-    df["adx"] = adx.adx()
+    df["adx"] = adx_indicator.adx()
+    df["di_plus"] = adx_indicator.adx_pos()
+    df["di_minus"] = adx_indicator.adx_neg()
 
     # Volume average
     df["volume_ma"] = (
@@ -151,10 +154,10 @@ def calculate_indicators(df):
 
 
 # ==================================================
-# CANDLE CONFIRMATION
+# CANDLE ANALYSIS
 # ==================================================
 
-def candle_confirmation(current):
+def analyze_candle(current):
 
     candle_range = (
         current["high"] -
@@ -171,7 +174,7 @@ def candle_confirmation(current):
 
     body_ratio = body / candle_range
 
-    # Strong bullish candle
+    # Bullish
     if (
         current["close"] >
         current["open"]
@@ -179,7 +182,7 @@ def candle_confirmation(current):
     ):
         return "BULLISH", 1
 
-    # Strong bearish candle
+    # Bearish
     if (
         current["close"] <
         current["open"]
@@ -191,60 +194,64 @@ def candle_confirmation(current):
 
 
 # ==================================================
-# GENERATE SIGNAL V3
+# GENERATE SIGNAL V4
 # ==================================================
 
 def generate_signal(df):
 
     current = df.iloc[-1]
 
-    score = 0
-
-    trend_points = 0
-    momentum_points = 0
-    confirmation_points = 0
+    trend_score = 0
+    momentum_score = 0
+    confirmation_score = 0
 
     reasons = []
 
     # ==================================================
-    # TREND
+    # 1. EMA TREND
     # ==================================================
 
     if current["ema9"] > current["ema21"]:
 
-        trend_points += 25
+        trend_score += 25
         reasons.append("EMA BULLISH")
 
     elif current["ema9"] < current["ema21"]:
 
-        trend_points -= 25
+        trend_score -= 25
         reasons.append("EMA BEARISH")
 
 
-    # Price position
+    # Price vs EMA9
 
     if current["close"] > current["ema9"]:
 
-        trend_points += 10
+        trend_score += 10
         reasons.append("PRICE ABOVE EMA9")
 
     elif current["close"] < current["ema9"]:
 
-        trend_points -= 10
+        trend_score -= 10
         reasons.append("PRICE BELOW EMA9")
 
 
-    # ADX
+    # ==================================================
+    # 2. ADX DIRECTION
+    # ==================================================
 
     if current["adx"] >= 25:
 
         reasons.append("ADX STRONG")
 
-        if trend_points > 0:
-            trend_points += 10
+        if current["di_plus"] > current["di_minus"]:
 
-        elif trend_points < 0:
-            trend_points -= 10
+            trend_score += 20
+            reasons.append("DI+ ABOVE DI-")
+
+        elif current["di_minus"] > current["di_plus"]:
+
+            trend_score -= 20
+            reasons.append("DI- ABOVE DI+")
 
     else:
 
@@ -252,19 +259,17 @@ def generate_signal(df):
 
 
     # ==================================================
-    # MOMENTUM
+    # 3. RSI
     # ==================================================
-
-    # RSI
 
     if 55 <= current["rsi"] < 70:
 
-        momentum_points += 20
+        momentum_score += 20
         reasons.append("RSI BULLISH")
 
     elif 30 < current["rsi"] <= 45:
 
-        momentum_points -= 20
+        momentum_score -= 20
         reasons.append("RSI BEARISH")
 
     elif current["rsi"] >= 70:
@@ -276,16 +281,18 @@ def generate_signal(df):
         reasons.append("RSI OVERSOLD")
 
 
-    # MACD
+    # ==================================================
+    # 4. MACD
+    # ==================================================
 
     if current["macd"] > current["macd_signal"]:
 
-        momentum_points += 20
+        momentum_score += 20
         reasons.append("MACD BULLISH")
 
     elif current["macd"] < current["macd_signal"]:
 
-        momentum_points -= 20
+        momentum_score -= 20
         reasons.append("MACD BEARISH")
 
 
@@ -293,31 +300,31 @@ def generate_signal(df):
 
     if current["macd_hist"] > 0:
 
-        momentum_points += 10
+        momentum_score += 10
         reasons.append("MACD HISTOGRAM POSITIVE")
 
     elif current["macd_hist"] < 0:
 
-        momentum_points -= 10
+        momentum_score -= 10
         reasons.append("MACD HISTOGRAM NEGATIVE")
 
 
     # ==================================================
-    # CANDLE
+    # 5. CANDLE CONFIRMATION
     # ==================================================
 
-    candle_type, candle_direction = candle_confirmation(
+    candle_type, candle_direction = analyze_candle(
         current
     )
 
     if candle_type == "BULLISH":
 
-        confirmation_points += 10
+        confirmation_score += 10
         reasons.append("BULLISH CANDLE")
 
     elif candle_type == "BEARISH":
 
-        confirmation_points -= 10
+        confirmation_score -= 10
         reasons.append("BEARISH CANDLE")
 
     else:
@@ -326,27 +333,47 @@ def generate_signal(df):
 
 
     # ==================================================
-    # VOLUME
+    # 6. VOLUME FILTER
     # ==================================================
 
-    volume_confirmed = False
+    volume_ratio = 0
 
     if (
         pd.notna(current["volume_ma"])
-        and
-        current["volume"] >
-        current["volume_ma"]
+        and current["volume_ma"] > 0
     ):
 
-        volume_confirmed = True
-        reasons.append("VOLUME CONFIRMED")
+        volume_ratio = (
+            current["volume"] /
+            current["volume_ma"]
+        )
 
-        if trend_points > 0:
-            confirmation_points += 5
 
-        elif trend_points < 0:
-            confirmation_points -= 5
+    # Strong volume
+    if volume_ratio >= 1.20:
 
+        reasons.append("HIGH VOLUME")
+
+        if trend_score > 0:
+            confirmation_score += 10
+
+        elif trend_score < 0:
+            confirmation_score -= 10
+
+
+    # Normal volume
+    elif volume_ratio >= 0.80:
+
+        reasons.append("NORMAL VOLUME")
+
+        if trend_score > 0:
+            confirmation_score += 5
+
+        elif trend_score < 0:
+            confirmation_score -= 5
+
+
+    # Low volume
     else:
 
         reasons.append("LOW VOLUME")
@@ -357,9 +384,9 @@ def generate_signal(df):
     # ==================================================
 
     score = (
-        trend_points +
-        momentum_points +
-        confirmation_points
+        trend_score +
+        momentum_score +
+        confirmation_score
     )
 
 
@@ -381,22 +408,29 @@ def generate_signal(df):
 
 
     # ==================================================
-    # ALIGNMENT
+    # DIRECTION ALIGNMENT
     # ==================================================
 
     bullish_alignment = (
-        trend_points > 0
-        and momentum_points > 0
+        trend_score >= 25
+        and momentum_score >= 20
     )
 
     bearish_alignment = (
-        trend_points < 0
-        and momentum_points < 0
+        trend_score <= -25
+        and momentum_score <= -20
     )
 
 
     # ==================================================
-    # SIGNAL DECISION
+    # VOLUME APPROVAL
+    # ==================================================
+
+    volume_ok = volume_ratio >= 0.80
+
+
+    # ==================================================
+    # FINAL SIGNAL
     # ==================================================
 
     signal = "WAIT"
@@ -405,6 +439,7 @@ def generate_signal(df):
         score >= 70
         and bullish_alignment
         and market_quality != "WEAK"
+        and volume_ok
     ):
 
         signal = "CALL"
@@ -413,6 +448,7 @@ def generate_signal(df):
         score <= -70
         and bearish_alignment
         and market_quality != "WEAK"
+        and volume_ok
     ):
 
         signal = "PUT"
@@ -429,7 +465,7 @@ def generate_signal(df):
     elif (
         abs(score) >= 90
         and market_quality == "STRONG"
-        and volume_confirmed
+        and volume_ratio >= 1.20
         and candle_type != "NEUTRAL"
     ):
 
@@ -445,7 +481,7 @@ def generate_signal(df):
 
 
     # ==================================================
-    # CONFIDENCE SCORE
+    # CONFIDENCE
     # ==================================================
 
     confidence = min(
@@ -460,9 +496,11 @@ def generate_signal(df):
         confidence,
         quality,
         market_quality,
-        trend_points,
-        momentum_points,
-        confirmation_points,
+        trend_score,
+        momentum_score,
+        confirmation_score,
+        volume_ratio,
+        candle_type,
         reasons
     )
 
@@ -473,9 +511,9 @@ def generate_signal(df):
 
 def main():
 
-    print("=" * 60)
+    print("=" * 65)
     print(BOT_NAME)
-    print("=" * 60)
+    print("=" * 65)
 
     print("Symbol:", SYMBOL)
     print("Market:", KRAKEN_PAIR)
@@ -486,7 +524,7 @@ def main():
 
     try:
 
-        # Get candles
+        # Market data
         df = get_market_data()
 
         if len(df) < 50:
@@ -495,29 +533,27 @@ def main():
                 "Not enough candle data received"
             )
 
-        # Calculate indicators
+        # Indicators
         df = calculate_indicators(df)
 
-        # Generate signal
+        # Signal
         (
             signal,
             score,
             confidence,
             quality,
             market_quality,
-            trend_points,
-            momentum_points,
-            confirmation_points,
+            trend_score,
+            momentum_score,
+            confirmation_score,
+            volume_ratio,
+            candle_type,
             reasons
         ) = generate_signal(df)
 
         current = df.iloc[-1]
 
-        # ==================================================
-        # OUTPUT
-        # ==================================================
-
-        print("-" * 60)
+        print("-" * 65)
 
         print(
             "Time:",
@@ -565,6 +601,16 @@ def main():
         )
 
         print(
+            "DI+:",
+            round(current["di_plus"], 2)
+        )
+
+        print(
+            "DI-:",
+            round(current["di_minus"], 2)
+        )
+
+        print(
             "Volume:",
             round(current["volume"], 4)
         )
@@ -574,21 +620,31 @@ def main():
             round(current["volume_ma"], 4)
         )
 
+        print(
+            "Volume Ratio:",
+            round(volume_ratio, 2)
+        )
+
+        print(
+            "Candle:",
+            candle_type
+        )
+
         print()
 
         print(
             "TREND SCORE:",
-            trend_points
+            trend_score
         )
 
         print(
             "MOMENTUM SCORE:",
-            momentum_points
+            momentum_score
         )
 
         print(
             "CONFIRMATION SCORE:",
-            confirmation_points
+            confirmation_score
         )
 
         print(
@@ -624,7 +680,7 @@ def main():
 
             print("-", reason)
 
-        print("-" * 60)
+        print("-" * 65)
 
     except Exception as e:
 
@@ -635,7 +691,7 @@ def main():
 
 
 # ==================================================
-# START
+# START BOT
 # ==================================================
 
 if __name__ == "__main__":
