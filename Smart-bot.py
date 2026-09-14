@@ -5,22 +5,17 @@ from datetime import datetime
 
 
 # ==================================================
-# SMART TRADING SIGNAL BOT
+# SMART TRADING SIGNAL BOT V2
 # ==================================================
 
-BOT_NAME = "Smart Trading Signal Bot"
+BOT_NAME = "Smart Trading Signal Bot V2"
 
-# Symbol displayed by the bot
 SYMBOL = "BTCUSD"
-
-# Kraken market
 KRAKEN_PAIR = "XBTUSD"
 
-# Timeframe
 INTERVAL = "5m"
 KRAKEN_INTERVAL = 5
 
-# Number of candles
 CANDLE_LIMIT = 100
 
 
@@ -64,9 +59,6 @@ def get_market_data():
 
     candles = result[pair_key]
 
-    # Kraken:
-    # time, open, high, low, close, vwap, volume, trades
-
     df = pd.DataFrame(
         candles,
         columns=[
@@ -81,7 +73,6 @@ def get_market_data():
         ]
     )
 
-    # Convert numeric columns
     numeric_columns = [
         "open",
         "high",
@@ -110,19 +101,18 @@ def get_market_data():
 
 def calculate_indicators(df):
 
-    # EMA 9
+    # EMA
     df["ema9"] = ta.trend.EMAIndicator(
         close=df["close"],
         window=9
     ).ema_indicator()
 
-    # EMA 21
     df["ema21"] = ta.trend.EMAIndicator(
         close=df["close"],
         window=21
     ).ema_indicator()
 
-    # RSI 14
+    # RSI
     df["rsi"] = ta.momentum.RSIIndicator(
         close=df["close"],
         window=14
@@ -137,12 +127,61 @@ def calculate_indicators(df):
     )
 
     df["macd"] = macd.macd()
-
     df["macd_signal"] = macd.macd_signal()
-
     df["macd_hist"] = macd.macd_diff()
 
+    # ADX
+    adx = ta.trend.ADXIndicator(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        window=14
+    )
+
+    df["adx"] = adx.adx()
+
+    # Average volume
+    df["volume_ma"] = (
+        df["volume"]
+        .rolling(window=20)
+        .mean()
+    )
+
     return df
+
+
+# ==================================================
+# CANDLE ANALYSIS
+# ==================================================
+
+def analyze_candle(current):
+
+    candle_range = current["high"] - current["low"]
+
+    if candle_range <= 0:
+        return 0, "NEUTRAL"
+
+    body = abs(
+        current["close"] - current["open"]
+    )
+
+    body_ratio = body / candle_range
+
+    # Bullish candle
+    if (
+        current["close"] > current["open"]
+        and body_ratio >= 0.55
+    ):
+        return 10, "BULLISH"
+
+    # Bearish candle
+    if (
+        current["close"] < current["open"]
+        and body_ratio >= 0.55
+    ):
+        return -10, "BEARISH"
+
+    return 0, "NEUTRAL"
 
 
 # ==================================================
@@ -155,67 +194,203 @@ def generate_signal(df):
 
     score = 0
 
+    reasons = []
+
     # ----------------------------------------------
-    # EMA TREND
+    # 1. EMA TREND
     # ----------------------------------------------
 
     if current["ema9"] > current["ema21"]:
-        score += 30
+
+        score += 25
+        reasons.append("EMA BULLISH")
 
     elif current["ema9"] < current["ema21"]:
-        score -= 30
 
-
-    # ----------------------------------------------
-    # RSI MOMENTUM
-    # ----------------------------------------------
-
-    if current["rsi"] >= 55:
-        score += 25
-
-    elif current["rsi"] <= 45:
         score -= 25
+        reasons.append("EMA BEARISH")
 
 
     # ----------------------------------------------
-    # MACD CONFIRMATION
+    # 2. PRICE VS EMA
+    # ----------------------------------------------
+
+    if current["close"] > current["ema9"]:
+
+        score += 10
+        reasons.append("PRICE ABOVE EMA9")
+
+    elif current["close"] < current["ema9"]:
+
+        score -= 10
+        reasons.append("PRICE BELOW EMA9")
+
+
+    # ----------------------------------------------
+    # 3. RSI
+    # ----------------------------------------------
+
+    if 55 <= current["rsi"] < 70:
+
+        score += 20
+        reasons.append("RSI BULLISH")
+
+    elif 30 < current["rsi"] <= 45:
+
+        score -= 20
+        reasons.append("RSI BEARISH")
+
+
+    # Avoid chasing extreme RSI
+    if current["rsi"] >= 70:
+
+        score -= 10
+        reasons.append("RSI OVERBOUGHT")
+
+    elif current["rsi"] <= 30:
+
+        score += 10
+        reasons.append("RSI OVERSOLD")
+
+
+    # ----------------------------------------------
+    # 4. MACD
     # ----------------------------------------------
 
     if current["macd"] > current["macd_signal"]:
-        score += 30
+
+        score += 20
+        reasons.append("MACD BULLISH")
 
     elif current["macd"] < current["macd_signal"]:
-        score -= 30
+
+        score -= 20
+        reasons.append("MACD BEARISH")
 
 
     # ----------------------------------------------
-    # RSI EXTREME PROTECTION
+    # 5. MACD HISTOGRAM
     # ----------------------------------------------
 
-    if current["rsi"] >= 70:
-        score -= 10
+    if current["macd_hist"] > 0:
 
-    elif current["rsi"] <= 30:
         score += 10
+        reasons.append("MACD HISTOGRAM POSITIVE")
+
+    elif current["macd_hist"] < 0:
+
+        score -= 10
+        reasons.append("MACD HISTOGRAM NEGATIVE")
 
 
     # ----------------------------------------------
-    # FINAL SIGNAL
+    # 6. ADX TREND STRENGTH
     # ----------------------------------------------
 
-    if score >= 60:
+    if current["adx"] >= 25:
+
+        reasons.append("STRONG TREND")
+
+        # Strengthens existing direction
+        if score > 0:
+            score += 10
+
+        elif score < 0:
+            score -= 10
+
+    else:
+
+        reasons.append("WEAK TREND")
+
+
+    # ----------------------------------------------
+    # 7. VOLUME CONFIRMATION
+    # ----------------------------------------------
+
+    if (
+        pd.notna(current["volume_ma"])
+        and current["volume"] > current["volume_ma"]
+    ):
+
+        reasons.append("VOLUME CONFIRMED")
+
+        if score > 0:
+            score += 5
+
+        elif score < 0:
+            score -= 5
+
+    else:
+
+        reasons.append("LOW VOLUME")
+
+
+    # ----------------------------------------------
+    # 8. CANDLE CONFIRMATION
+    # ----------------------------------------------
+
+    candle_score, candle_type = analyze_candle(
+        current
+    )
+
+    score += candle_score
+
+    if candle_type == "BULLISH":
+
+        reasons.append("BULLISH CANDLE")
+
+    elif candle_type == "BEARISH":
+
+        reasons.append("BEARISH CANDLE")
+
+
+    # ----------------------------------------------
+    # FINAL DECISION
+    # ----------------------------------------------
+
+    if score >= 65:
+
         signal = "CALL"
 
-    elif score <= -60:
+    elif score <= -65:
+
         signal = "PUT"
 
     else:
+
         signal = "WAIT"
 
 
-    confidence = min(abs(score), 100)
+    confidence = min(
+        int(abs(score)),
+        100
+    )
 
-    return signal, score, confidence
+
+    # ----------------------------------------------
+    # MARKET QUALITY
+    # ----------------------------------------------
+
+    if current["adx"] < 20:
+
+        market_quality = "LOW TREND"
+
+    elif current["adx"] < 25:
+
+        market_quality = "MODERATE"
+
+    else:
+
+        market_quality = "STRONG TREND"
+
+
+    return (
+        signal,
+        score,
+        confidence,
+        market_quality,
+        reasons
+    )
 
 
 # ==================================================
@@ -224,9 +399,9 @@ def generate_signal(df):
 
 def main():
 
-    print("=" * 50)
+    print("=" * 55)
     print(BOT_NAME)
-    print("=" * 50)
+    print("=" * 55)
 
     print("Symbol:", SYMBOL)
     print("Market:", KRAKEN_PAIR)
@@ -237,23 +412,30 @@ def main():
 
     try:
 
-        # Get market data
+        # Get data
         df = get_market_data()
 
-        if len(df) < 30:
+        if len(df) < 50:
+
             raise Exception(
                 "Not enough candle data received"
             )
 
-        # Calculate indicators
+        # Indicators
         df = calculate_indicators(df)
 
-        # Generate signal
-        signal, score, confidence = generate_signal(df)
+        # Signal
+        (
+            signal,
+            score,
+            confidence,
+            market_quality,
+            reasons
+        ) = generate_signal(df)
 
         current = df.iloc[-1]
 
-        print("-" * 50)
+        print("-" * 55)
 
         print(
             "Time:",
@@ -296,6 +478,26 @@ def main():
         )
 
         print(
+            "ADX:",
+            round(current["adx"], 2)
+        )
+
+        print(
+            "Volume:",
+            round(current["volume"], 4)
+        )
+
+        print(
+            "Average Volume:",
+            round(current["volume_ma"], 4)
+        )
+
+        print(
+            "Market Quality:",
+            market_quality
+        )
+
+        print(
             "SIGNAL:",
             signal
         )
@@ -310,7 +512,15 @@ def main():
             str(confidence) + "%"
         )
 
-        print("-" * 50)
+        print()
+
+        print("REASONS:")
+
+        for reason in reasons:
+
+            print("-", reason)
+
+        print("-" * 55)
 
     except Exception as e:
 
@@ -321,7 +531,7 @@ def main():
 
 
 # ==================================================
-# START BOT
+# START
 # ==================================================
 
 if __name__ == "__main__":
