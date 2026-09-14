@@ -11,8 +11,7 @@ CANDLE_LIMIT = 100
 
 
 def get_market_data():
-    # CoinGecko لا يوفر شموع 5 دقائق مباشرة،
-    # لذلك نستخدم Kraken كبديل لمصدر بيانات السوق.
+
     url = "https://api.kraken.com/0/public/OHLC"
 
     params = {
@@ -20,13 +19,20 @@ def get_market_data():
         "interval": 5
     }
 
-    response = requests.get(url, params=params, timeout=15)
+    response = requests.get(
+        url,
+        params=params,
+        timeout=15
+    )
+
     response.raise_for_status()
 
     data = response.json()
 
     if data.get("error"):
-        raise Exception("Kraken API error: " + str(data["error"]))
+        raise Exception(
+            "Kraken API error: " + str(data["error"])
+        )
 
     result = data.get("result", {})
 
@@ -40,12 +46,16 @@ def get_market_data():
 
     candles = result[pair_key]
 
+    # Kraken returns 8 values per candle:
+    # time, open, high, low, close, vwap, volume, trades
+
     df = pd.DataFrame(candles, columns=[
         "time",
         "open",
         "high",
         "low",
         "close",
+        "vwap",
         "volume",
         "trades"
     ])
@@ -57,7 +67,6 @@ def get_market_data():
     df = df.tail(CANDLE_LIMIT).reset_index(drop=True)
 
     return df
-
 
 def calculate_indicators(df):
 
