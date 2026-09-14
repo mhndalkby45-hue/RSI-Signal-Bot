@@ -23,42 +23,72 @@ EXPIRY_CANDLES = 1
 
 def get_data():
 
-    url = "https://api.binance.com/api/v3/klines"
+    url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
 
-    params = {
-        "symbol": SYMBOL,
-        "interval": INTERVAL,
-        "limit": LIMIT
-    }
+    all_candles = []
 
-    response = requests.get(
-        url,
-        params=params,
-        timeout=15
+    end_time = int(
+        pd.Timestamp.now(tz="UTC").timestamp()
     )
 
-    response.raise_for_status()
+    # 1000 شمعة = حوالي 3.5 أيام على إطار 5 دقائق
+    candles_needed = LIMIT
 
-    data = response.json()
+    while len(all_candles) < candles_needed:
+
+        start_time = end_time - (300 * 300)
+
+        params = {
+            "start": start_time,
+            "end": end_time,
+            "granularity": 300
+        }
+
+        response = requests.get(
+            url,
+            params=params,
+            timeout=20
+        )
+
+        response.raise_for_status()
+
+        batch = response.json()
+
+        if not batch:
+            break
+
+        all_candles.extend(batch)
+
+        oldest_time = min(
+            candle[0]
+            for candle in batch
+        )
+
+        end_time = oldest_time - 300
+
+        if len(batch) < 300:
+            break
+
+    all_candles = all_candles[:candles_needed]
 
     columns = [
-        "open_time",
-        "open",
-        "high",
+        "time",
         "low",
+        "high",
+        "open",
         "close",
-        "volume",
-        "close_time",
-        "quote_volume",
-        "trades",
-        "buy_volume",
-        "buy_quote_volume",
-        "ignore"
+        "volume"
     ]
 
     df = pd.DataFrame(
-        data,
+        all_candles,
         columns=columns
+    )
+
+    df["time"] = pd.to_datetime(
+        df["time"],
+        unit="s",
+        utc=True
     )
 
     for column in [
@@ -74,9 +104,14 @@ def get_data():
             errors="coerce"
         )
 
-    df["time"] = pd.to_datetime(
-        df["open_time"],
-        unit="ms"
+    df = df.sort_values(
+        "time"
+    ).drop_duplicates(
+        subset="time"
+    )
+
+    df = df.tail(LIMIT).reset_index(
+        drop=True
     )
 
     return df
