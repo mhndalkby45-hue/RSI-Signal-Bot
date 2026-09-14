@@ -29,5 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Optimize-MACD-CALL-V15.py
+        run: python Validate-MACD-CALL-Extended.py
        
