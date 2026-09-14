@@ -29,5 +29,5 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Analyze-MACD-CALL-Filters-V15.py
+        run: python Validate-MACD-ADX30-Extended.py
        
