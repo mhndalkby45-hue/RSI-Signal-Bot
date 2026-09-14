@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 import numpy as np
 
+
 BOT_NAME = "Smart Trading Signal Bot V15"
 
 DATA_SYMBOL = "BTC-USD"
@@ -32,12 +33,11 @@ PAYOUT = 0.80
 
 
 def get_data():
-
     url = (
         "https://api.exchange.coinbase.com/"
         "products/"
-        + DATA_SYMBOL +
-        "/candles"
+        + DATA_SYMBOL
+        + "/candles"
     )
 
     all_candles = []
@@ -49,11 +49,7 @@ def get_data():
     )
 
     while len(all_candles) < LIMIT:
-
-        start_time = (
-            end_time -
-            (300 * 300)
-        )
+        start_time = end_time - (300 * 300)
 
         params = {
             "start": start_time,
@@ -113,7 +109,6 @@ def get_data():
         "close",
         "volume"
     ]:
-
         df[column] = pd.to_numeric(
             df[column],
             errors="coerce"
@@ -132,7 +127,13 @@ def get_data():
     )
 
     return df
-    def calculate_indicators(df):
+
+
+def calculate_indicators(df):
+
+    # =========================
+    # EMA
+    # =========================
 
     df["ema_fast"] = df["close"].ewm(
         span=EMA_FAST,
@@ -148,6 +149,10 @@ def get_data():
         span=EMA_TREND,
         adjust=False
     ).mean()
+
+    # =========================
+    # RSI
+    # =========================
 
     delta = df["close"].diff()
 
@@ -173,6 +178,10 @@ def get_data():
         100 / (1 + rs)
     )
 
+    # =========================
+    # MACD
+    # =========================
+
     ema12 = df["close"].ewm(
         span=MACD_FAST,
         adjust=False
@@ -191,20 +200,20 @@ def get_data():
     ).mean()
 
     df["macd_hist"] = (
-        df["macd"] -
-        df["macd_signal"]
+        df["macd"]
+        - df["macd_signal"]
     )
 
+    # =========================
+    # ADX / DI
+    # =========================
+
     high = df["high"]
-
     low = df["low"]
-
     close = df["close"]
 
     previous_high = high.shift(1)
-
     previous_low = low.shift(1)
-
     previous_close = close.shift(1)
 
     tr1 = high - low
@@ -231,15 +240,15 @@ def get_data():
     )
 
     plus_dm = np.where(
-        (up_move > down_move) &
-        (up_move > 0),
+        (up_move > down_move)
+        & (up_move > 0),
         up_move,
         0
     )
 
     minus_dm = np.where(
-        (down_move > up_move) &
-        (down_move > 0),
+        (down_move > up_move)
+        & (down_move > 0),
         down_move,
         0
     )
@@ -261,29 +270,29 @@ def get_data():
     )
 
     plus_di = (
-        100 *
-        plus_dm.ewm(
+        100
+        * plus_dm.ewm(
             alpha=1 / ADX_PERIOD,
             min_periods=ADX_PERIOD,
             adjust=False
-        ).mean() /
-        atr
+        ).mean()
+        / atr
     )
 
     minus_di = (
-        100 *
-        minus_dm.ewm(
+        100
+        * minus_dm.ewm(
             alpha=1 / ADX_PERIOD,
             min_periods=ADX_PERIOD,
             adjust=False
-        ).mean() /
-        atr
+        ).mean()
+        / atr
     )
 
     dx = (
-        100 *
-        (plus_di - minus_di).abs() /
-        (plus_di + minus_di)
+        100
+        * (plus_di - minus_di).abs()
+        / (plus_di + minus_di)
     )
 
     df["adx"] = dx.ewm(
@@ -296,14 +305,18 @@ def get_data():
 
     df["minus_di"] = minus_di
 
+    # =========================
+    # CANDLE ANALYSIS
+    # =========================
+
     df["body"] = (
-        df["close"] -
-        df["open"]
+        df["close"]
+        - df["open"]
     ).abs()
 
     df["range"] = (
-        df["high"] -
-        df["low"]
+        df["high"]
+        - df["low"]
     )
 
     df["body_ratio"] = np.where(
@@ -313,17 +326,19 @@ def get_data():
     )
 
     df["bullish_candle"] = (
-        (df["close"] > df["open"]) &
-        (df["body_ratio"] >= 0.50)
+        (df["close"] > df["open"])
+        & (df["body_ratio"] >= 0.50)
     )
 
     df["bearish_candle"] = (
-        (df["close"] < df["open"]) &
-        (df["body_ratio"] >= 0.50)
+        (df["close"] < df["open"])
+        & (df["body_ratio"] >= 0.50)
     )
 
     return df
-    def get_signal(df, index):
+
+
+def get_signal(df, index):
 
     row = df.iloc[index]
     previous = df.iloc[index - 1]
@@ -339,130 +354,121 @@ def get_data():
     ]
 
     for column in required_columns:
-
         if pd.isna(row[column]):
-
             return "WAIT", 0
 
     if row["adx"] < ADX_MIN:
-
         return "WAIT", 0
 
     buy_score = 0
     sell_score = 0
 
+    # =========================
     # EMA TREND
+    # =========================
 
     if (
-        row["ema_fast"] >
-        row["ema_slow"] >
-        row["ema_trend"]
+        row["ema_fast"]
+        > row["ema_slow"]
+        > row["ema_trend"]
     ):
-
         buy_score += 2
 
     if (
-        row["ema_fast"] <
-        row["ema_slow"] <
-        row["ema_trend"]
+        row["ema_fast"]
+        < row["ema_slow"]
+        < row["ema_trend"]
     ):
-
         sell_score += 2
 
+    # =========================
     # PRICE POSITION
+    # =========================
 
     if row["close"] > row["ema_trend"]:
-
         buy_score += 1
 
     if row["close"] < row["ema_trend"]:
-
         sell_score += 1
 
+    # =========================
     # RSI
+    # =========================
 
     if 52 <= row["rsi"] <= 68:
-
         buy_score += 1
 
     if 32 <= row["rsi"] <= 48:
-
         sell_score += 1
 
+    # =========================
     # MACD
+    # =========================
 
     if (
-        row["macd"] >
-        row["macd_signal"]
-        and
-        row["macd_hist"] >
-        previous["macd_hist"]
+        row["macd"] > row["macd_signal"]
+        and row["macd_hist"]
+        > previous["macd_hist"]
     ):
-
         buy_score += 2
 
     if (
-        row["macd"] <
-        row["macd_signal"]
-        and
-        row["macd_hist"] <
-        previous["macd_hist"]
+        row["macd"] < row["macd_signal"]
+        and row["macd_hist"]
+        < previous["macd_hist"]
     ):
-
         sell_score += 2
 
+    # =========================
     # DIRECTIONAL MOVEMENT
+    # =========================
 
     if row["plus_di"] > row["minus_di"]:
-
         buy_score += 1
 
     if row["minus_di"] > row["plus_di"]:
-
         sell_score += 1
 
+    # =========================
     # CANDLE CONFIRMATION
+    # =========================
 
     if row["bullish_candle"]:
-
         buy_score += 1
 
     if row["bearish_candle"]:
-
         sell_score += 1
 
+    # =========================
     # FINAL SIGNAL
+    # =========================
 
     if (
         buy_score >= MIN_SCORE
-        and
-        buy_score > sell_score
+        and buy_score > sell_score
     ):
-
         confidence = min(
             100,
-            50 +
-            (buy_score - 5) * 10
+            50 + (buy_score - 5) * 10
         )
 
         return "CALL", confidence
 
     if (
         sell_score >= MIN_SCORE
-        and
-        sell_score > buy_score
+        and sell_score > buy_score
     ):
-
         confidence = min(
             100,
-            50 +
-            (sell_score - 5) * 10
+            50 + (sell_score - 5) * 10
         )
 
         return "PUT", confidence
 
     return "WAIT", 0
-    def run_backtest(df):
+
+
+def run_backtest(df):
 
     trades = []
 
@@ -489,37 +495,42 @@ def get_data():
         entry_price = df.iloc[i]["close"]
 
         exit_index = (
-            i +
-            EXPIRY_CANDLES
+            i + EXPIRY_CANDLES
         )
 
-        exit_price = df.iloc[exit_index]["close"]
+        exit_price = df.iloc[
+            exit_index
+        ]["close"]
 
+        # =========================
         # RESULT
+        # =========================
 
         if signal == "CALL":
 
             win = (
-                exit_price >
-                entry_price
+                exit_price
+                > entry_price
             )
 
         else:
 
             win = (
-                exit_price <
-                entry_price
+                exit_price
+                < entry_price
             )
 
+        # =========================
         # PAYOUT
+        # =========================
 
         if win:
 
             result = "WIN"
 
             profit = (
-                STAKE *
-                PAYOUT
+                STAKE
+                * PAYOUT
             )
 
             balance += profit
@@ -537,30 +548,31 @@ def get_data():
             current_loss_streak += 1
 
             if (
-                current_loss_streak >
-                max_loss_streak
+                current_loss_streak
+                > max_loss_streak
             ):
-
                 max_loss_streak = (
                     current_loss_streak
                 )
 
+        # =========================
         # DRAWDOWN
+        # =========================
 
         if balance > peak_balance:
-
             peak_balance = balance
 
         drawdown = (
-            peak_balance -
-            balance
+            peak_balance
+            - balance
         )
 
         if drawdown > max_drawdown:
-
             max_drawdown = drawdown
 
+        # =========================
         # SAVE TRADE
+        # =========================
 
         trades.append({
             "time": df.iloc[i]["time"],
@@ -579,8 +591,9 @@ def get_data():
         max_drawdown,
         max_loss_streak
     )
-    
-    def analyze_results(
+
+
+def analyze_results(
     trades,
     final_balance,
     max_drawdown,
@@ -607,24 +620,26 @@ def get_data():
     )
 
     losses = (
-        total_trades -
-        wins
+        total_trades
+        - wins
     )
 
     win_rate = (
-        wins /
-        total_trades
+        wins
+        / total_trades
     ) * 100
 
     avg_confidence = (
         sum(
             trade["confidence"]
             for trade in trades
-        ) /
-        total_trades
+        )
+        / total_trades
     )
 
+    # =========================
     # CALL / PUT
+    # =========================
 
     call_trades = [
         trade
@@ -651,22 +666,24 @@ def get_data():
     )
 
     call_win_rate = (
-        call_wins /
-        len(call_trades) *
-        100
+        call_wins
+        / len(call_trades)
+        * 100
         if call_trades
         else 0
     )
 
     put_win_rate = (
-        put_wins /
-        len(put_trades) *
-        100
+        put_wins
+        / len(put_trades)
+        * 100
         if put_trades
         else 0
     )
 
+    # =========================
     # PROFIT FACTOR
+    # =========================
 
     total_profit = sum(
         trade["profit"]
@@ -685,22 +702,26 @@ def get_data():
     if total_loss > 0:
 
         profit_factor = (
-            total_profit /
-            total_loss
+            total_profit
+            / total_loss
         )
 
     else:
 
         profit_factor = float("inf")
 
+    # =========================
     # BREAK EVEN
+    # =========================
 
     break_even_rate = (
-        1 /
-        (1 + PAYOUT)
+        1
+        / (1 + PAYOUT)
     ) * 100
 
+    # =========================
     # RESULTS
+    # =========================
 
     print(
         "Total Trades      :",
@@ -758,6 +779,7 @@ def get_data():
     )
 
     print()
+
     print(
         "CALL Trades       :",
         len(call_trades)
@@ -770,6 +792,7 @@ def get_data():
     )
 
     print()
+
     print(
         "PUT Trades        :",
         len(put_trades)
@@ -781,7 +804,9 @@ def get_data():
         "%"
     )
 
+    # =========================
     # EVALUATION
+    # =========================
 
     print()
     print("==================================================")
@@ -789,18 +814,17 @@ def get_data():
     print("==================================================")
 
     if (
-        win_rate >
-        break_even_rate
-        and
-        profit_factor > 1
+        win_rate > break_even_rate
+        and profit_factor > 1
     ):
 
-        print("STATUS: POSITIVE EDGE")
+        print(
+            "STATUS: POSITIVE EDGE"
+        )
 
     elif (
         win_rate >= 50
-        and
-        profit_factor >= 1
+        and profit_factor >= 1
     ):
 
         print(
@@ -813,7 +837,9 @@ def get_data():
             "STATUS: NOT PROFITABLE"
         )
 
-    # LAST TRADES
+    # =========================
+    # LAST 10 TRADES
+    # =========================
 
     print()
     print("LAST 10 TRADES:")
@@ -903,5 +929,4 @@ def main():
 
 
 if __name__ == "__main__":
-
     main()
