@@ -29,6 +29,6 @@ jobs:
           find . -maxdepth 2 -name "*.py"
 
       - name: Run bot
-        run: python Validate-MACD-ADX35-EMA50-ADXStrength.py
+        run: python Smart-Trading-Bot-Final.py
     
      
