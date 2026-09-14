@@ -24,6 +24,7 @@ BREAK_EVEN = 1 / (1 + PAYOUT)
 
 
 def download_candles(days):
+    print("DOWNLOAD FUNCTION STARTED")
 
     print("")
     print("=" * 70)
