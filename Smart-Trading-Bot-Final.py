@@ -164,23 +164,20 @@ def analyze_signal(df):
     if len(df) < 100:
         return None
 
-    # Use the last COMPLETED candle.
-    # The last candle may still be forming.
+    # Last completed candle
     current = df.iloc[-2]
     previous = df.iloc[-3]
 
-    if pd.isna(current["macd"]):
+    if pd.isna(current["macd"]) or pd.isna(current["macd_signal"]):
         return None
 
-    if pd.isna(current["macd_signal"]):
+    if pd.isna(previous["macd"]) or pd.isna(previous["macd_signal"]):
         return None
 
-    if pd.isna(current["adx"]):
+    if pd.isna(current["adx"]) or pd.isna(current["ema50"]):
         return None
 
-    if pd.isna(current["ema50"]):
-        return None
-
+    # MACD bullish cross
     macd_cross = (
         current["macd"] > current["macd_signal"]
         and
@@ -191,19 +188,47 @@ def analyze_signal(df):
 
     ema_ok = current["close"] > current["ema50"]
 
-    if macd_cross and adx_ok and ema_ok:
+    # ========================================================
+    # DIAGNOSTIC INFORMATION
+    # ========================================================
 
-        return {
-            "signal": "CALL",
-            "time": current["timestamp"],
-            "price": float(current["close"]),
-            "macd": float(current["macd"]),
-            "macd_signal": float(current["macd_signal"]),
-            "adx": float(current["adx"]),
-            "ema50": float(current["ema50"])
-        }
+    if not macd_cross:
+        return None
 
-    return None
+    if not adx_ok:
+
+        print(
+            f"MACD CROSS detected | "
+            f"ADX {current['adx']:.2f} < {ADX_MIN} | "
+            f"Rejected"
+        )
+
+        return None
+
+    if not ema_ok:
+
+        print(
+            f"MACD CROSS + ADX OK | "
+            f"Price {current['close']:.2f} < "
+            f"EMA50 {current['ema50']:.2f} | "
+            f"Rejected"
+        )
+
+        return None
+
+    # ========================================================
+    # VALID CALL SIGNAL
+    # ========================================================
+
+    return {
+        "signal": "CALL",
+        "time": current["timestamp"],
+        "price": float(current["close"]),
+        "macd": float(current["macd"]),
+        "macd_signal": float(current["macd_signal"]),
+        "adx": float(current["adx"]),
+        "ema50": float(current["ema50"])
+    }
 
 
 # ============================================================
@@ -212,42 +237,44 @@ def analyze_signal(df):
 
 def calculate_confidence(signal):
 
-    score = 0
-
     # MACD bullish cross
-    score += 40
+    score = 40
 
     # ADX strength
     adx = signal["adx"]
 
     if adx >= 45:
-        score += 10
+
+        score += 20
 
     elif adx >= 40:
+
         score += 15
 
     elif adx >= 35:
-        score += 20
 
-    # Price above EMA
+        score += 10
+
+    # Distance above EMA50
     distance = (
         (signal["price"] - signal["ema50"])
         / signal["ema50"]
     ) * 100
 
     if distance >= 0.50:
+
         score += 25
 
     elif distance >= 0.20:
+
         score += 20
 
     elif distance > 0:
+
         score += 15
 
-    # Cap confidence
-    score = min(score, 100)
-
-    return score
+    # Maximum confidence = 100
+    return min(score, 100)
 
 
 # ============================================================
@@ -263,9 +290,11 @@ def save_trade(trade):
     total_trades += 1
 
     if trade["result"] == "WIN":
+
         wins += 1
 
     elif trade["result"] == "LOSS":
+
         losses += 1
 
     row = pd.DataFrame([trade])
@@ -309,7 +338,7 @@ def save_trade(trade):
 
     print()
     print("=" * 60)
-    print("📊 PAPER TRADE RESULT")
+    print("PAPER TRADE RESULT")
     print("=" * 60)
 
     print(
@@ -447,7 +476,7 @@ def print_signal(signal):
 
     print()
     print("=" * 60)
-    print("🟢 CALL SIGNAL")
+    print("CALL SIGNAL")
     print("=" * 60)
 
     print(
