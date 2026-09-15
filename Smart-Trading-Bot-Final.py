@@ -29,6 +29,19 @@ EXPIRY_CANDLES = 2
 
 
 # ============================================================
+# PAPER TRADING / TRADE LOG
+# ============================================================
+
+TRADE_LOG_FILE = "smart_trades.csv"
+
+pending_trade = None
+
+total_trades = 0
+wins = 0
+losses = 0
+
+
+# ============================================================
 # DOWNLOAD CANDLES
 # ============================================================
 
@@ -238,6 +251,193 @@ def calculate_confidence(signal):
 
 
 # ============================================================
+# SAVE COMPLETED TRADE
+# ============================================================
+
+def save_trade(trade):
+
+    global total_trades
+    global wins
+    global losses
+
+    total_trades += 1
+
+    if trade["result"] == "WIN":
+        wins += 1
+
+    elif trade["result"] == "LOSS":
+        losses += 1
+
+    row = pd.DataFrame([trade])
+
+    try:
+
+        try:
+
+            existing = pd.read_csv(
+                TRADE_LOG_FILE
+            )
+
+            updated = pd.concat(
+                [existing, row],
+                ignore_index=True
+            )
+
+            updated.to_csv(
+                TRADE_LOG_FILE,
+                index=False
+            )
+
+        except FileNotFoundError:
+
+            row.to_csv(
+                TRADE_LOG_FILE,
+                index=False
+            )
+
+    except Exception as e:
+
+        print()
+        print("ERROR saving trade:")
+        print(str(e))
+
+    win_rate = (
+        (wins / total_trades) * 100
+        if total_trades > 0
+        else 0
+    )
+
+    print()
+    print("=" * 60)
+    print("📊 PAPER TRADE RESULT")
+    print("=" * 60)
+
+    print(
+        "Direction:",
+        trade["direction"]
+    )
+
+    print(
+        "Entry:",
+        f"{trade['entry_price']:.2f}"
+    )
+
+    print(
+        "Exit:",
+        f"{trade['exit_price']:.2f}"
+    )
+
+    print(
+        "Change:",
+        f"{trade['price_change']:.2f}"
+    )
+
+    print()
+    print(
+        "RESULT:",
+        trade["result"]
+    )
+
+    print()
+    print(
+        "Total Trades:",
+        total_trades
+    )
+
+    print(
+        "Wins:",
+        wins
+    )
+
+    print(
+        "Losses:",
+        losses
+    )
+
+    print(
+        "Win Rate:",
+        f"{win_rate:.2f}%"
+    )
+
+    print("=" * 60)
+    print()
+
+
+# ============================================================
+# CHECK PENDING TRADE
+# ============================================================
+
+def check_pending_trade(df):
+
+    global pending_trade
+
+    if pending_trade is None:
+        return
+
+    current_candle = df.iloc[-2]
+
+    current_time = current_candle["timestamp"]
+
+    entry_time = pending_trade["entry_time"]
+
+    expiry_seconds = (
+        EXPIRY_CANDLES * GRANULARITY
+    )
+
+    elapsed = (
+        current_time - entry_time
+    ).total_seconds()
+
+    if elapsed < expiry_seconds:
+        return
+
+    exit_price = float(
+        current_candle["close"]
+    )
+
+    entry_price = pending_trade["entry_price"]
+
+    price_change = (
+        exit_price - entry_price
+    )
+
+    if exit_price > entry_price:
+
+        result = "WIN"
+
+    elif exit_price < entry_price:
+
+        result = "LOSS"
+
+    else:
+
+        result = "DRAW"
+
+    trade = {
+        "entry_time": entry_time.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+        "exit_time": current_time.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+        "direction": "CALL",
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "price_change": price_change,
+        "macd": pending_trade["macd"],
+        "macd_signal": pending_trade["macd_signal"],
+        "adx": pending_trade["adx"],
+        "ema50": pending_trade["ema50"],
+        "confidence": pending_trade["confidence"],
+        "result": result
+    }
+
+    save_trade(trade)
+
+    pending_trade = None
+
+
+# ============================================================
 # PRINT SIGNAL
 # ============================================================
 
@@ -263,7 +463,12 @@ def print_signal(signal):
     )
 
     print()
-    print("MACD:", f"{signal['macd']:.6f}")
+
+    print(
+        "MACD:",
+        f"{signal['macd']:.6f}"
+    )
+
     print(
         "MACD Signal:",
         f"{signal['macd_signal']:.6f}"
@@ -280,8 +485,10 @@ def print_signal(signal):
     )
 
     print()
+
     print("Direction: CALL")
     print("Expiry: 10 minutes")
+
     print(
         "Confidence:",
         f"{confidence}%"
@@ -317,23 +524,51 @@ def print_status(df):
 
 def main():
 
+    global pending_trade
+
     print()
     print("=" * 60)
     print(BOT_NAME)
     print("=" * 60)
 
-    print("Symbol:", SYMBOL)
-    print("Timeframe: 5 minutes")
+    print(
+        "Symbol:",
+        SYMBOL
+    )
+
+    print(
+        "Timeframe: 5 minutes"
+    )
+
     print("Strategy:")
     print("MACD Bullish Cross")
     print("ADX >= 35")
     print("Price > EMA50")
-    print("Direction: CALL only")
-    print("Expiry: 10 minutes")
+
+    print(
+        "Direction: CALL only"
+    )
+
+    print(
+        "Expiry: 10 minutes"
+    )
+
     print()
+
     print("Starting bot...")
-    print("The bot uses completed candles only.")
-    print("No automatic trades are executed.")
+
+    print(
+        "The bot uses completed candles only."
+    )
+
+    print(
+        "Paper Trading: ENABLED"
+    )
+
+    print(
+        "No automatic trades are executed."
+    )
+
     print("=" * 60)
     print()
 
@@ -353,18 +588,33 @@ def main():
                     "Retrying..."
                 )
 
-                time.sleep(POLL_SECONDS)
+                time.sleep(
+                    POLL_SECONDS
+                )
+
                 continue
 
             df = calculate_indicators(df)
 
             completed_candle = df.iloc[-2]
-            candle_time = completed_candle["timestamp"]
+
+            candle_time = (
+                completed_candle["timestamp"]
+            )
 
             # Only analyze when a new candle has completed.
-            if candle_time != last_checked_candle:
+            if (
+                candle_time
+                != last_checked_candle
+            ):
 
-                last_checked_candle = candle_time
+                last_checked_candle = (
+                    candle_time
+                )
+
+                # Check existing paper trade
+                # before looking for a new signal.
+                check_pending_trade(df)
 
                 print()
 
@@ -393,7 +643,45 @@ def main():
                             signal["time"]
                         )
 
-                        print_signal(signal)
+                        confidence = (
+                            calculate_confidence(
+                                signal
+                            )
+                        )
+
+                        signal["confidence"] = (
+                            confidence
+                        )
+
+                        print_signal(
+                            signal
+                        )
+
+                        # Start paper trade
+                        pending_trade = {
+                            "entry_time":
+                                signal["time"],
+
+                            "entry_price":
+                                signal["price"],
+
+                            "macd":
+                                signal["macd"],
+
+                            "macd_signal":
+                                signal[
+                                    "macd_signal"
+                                ],
+
+                            "adx":
+                                signal["adx"],
+
+                            "ema50":
+                                signal["ema50"],
+
+                            "confidence":
+                                confidence
+                        }
 
                     else:
 
@@ -405,28 +693,39 @@ def main():
 
                     print_status(df)
 
-            time.sleep(POLL_SECONDS)
+            time.sleep(
+                POLL_SECONDS
+            )
 
         except KeyboardInterrupt:
 
             print()
+
             print(
                 "Bot stopped by user."
             )
+
             break
 
         except Exception as e:
 
             print()
+
             print(
                 "Unexpected error:"
             )
-            print(str(e))
+
+            print(
+                str(e)
+            )
+
             print(
                 "Retrying..."
             )
 
-            time.sleep(POLL_SECONDS)
+            time.sleep(
+                POLL_SECONDS
+            )
 
 
 # ============================================================
@@ -434,4 +733,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
