@@ -1,4 +1,6 @@
 import time
+import os
+import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -13,6 +15,7 @@ from ta.momentum import RSIIndicator
 # FOREX SIGNAL PRO
 # RSI + EMA + MACD
 # TIMEFRAME: 5 MINUTES
+# TELEGRAM NOTIFICATIONS
 # ============================================================
 
 BOT_NAME = "Forex Signal Pro"
@@ -34,12 +37,67 @@ SCAN_INTERVAL = 300  # 5 minutes
 
 
 # ============================================================
+# TELEGRAM SETTINGS
+# ============================================================
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+
+def send_telegram(message):
+
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram settings not found.")
+        return False
+
+    url = (
+        f"https://api.telegram.org/bot"
+        f"{TELEGRAM_BOT_TOKEN}/sendMessage"
+    )
+
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message
+    }
+
+    try:
+
+        response = requests.post(
+            url,
+            data=payload,
+            timeout=15
+        )
+
+        if response.ok:
+            print("Telegram notification sent.")
+            return True
+
+        print(
+            "Telegram error:",
+            response.status_code,
+            response.text
+        )
+
+        return False
+
+    except Exception as e:
+
+        print(
+            "Telegram connection error:",
+            e
+        )
+
+        return False
+
+
+# ============================================================
 # GET MARKET DATA
 # ============================================================
 
 def get_data(symbol):
 
     try:
+
         data = yf.download(
             symbol,
             period=DATA_PERIOD,
@@ -56,9 +114,15 @@ def get_data(symbol):
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
 
-        required = ["Open", "High", "Low", "Close"]
+        required = [
+            "Open",
+            "High",
+            "Low",
+            "Close"
+        ]
 
         for column in required:
+
             if column not in data.columns:
                 return None
 
@@ -70,7 +134,11 @@ def get_data(symbol):
         return data
 
     except Exception as e:
-        print(f"Data error for {symbol}: {e}")
+
+        print(
+            f"Data error for {symbol}: {e}"
+        )
+
         return None
 
 
@@ -83,6 +151,7 @@ def analyze_pair(pair_name, symbol):
     data = get_data(symbol)
 
     if data is None:
+
         return {
             "pair": pair_name,
             "signal": "NO DATA"
@@ -133,11 +202,21 @@ def analyze_pair(pair_name, symbol):
         latest = -2
 
         price = float(close.iloc[latest])
-        ema20_value = float(ema20.iloc[latest])
-        ema50_value = float(ema50.iloc[latest])
-        rsi_value = float(rsi.iloc[latest])
-        macd_value = float(macd.iloc[latest])
-        signal_value = float(signal_line.iloc[latest])
+        ema20_value = float(
+            ema20.iloc[latest]
+        )
+        ema50_value = float(
+            ema50.iloc[latest]
+        )
+        rsi_value = float(
+            rsi.iloc[latest]
+        )
+        macd_value = float(
+            macd.iloc[latest]
+        )
+        signal_value = float(
+            signal_line.iloc[latest]
+        )
 
         # ====================================================
         # SIGNAL LOGIC
@@ -153,8 +232,13 @@ def analyze_pair(pair_name, symbol):
             and ema20_value < ema50_value
         )
 
-        bullish_macd = macd_value > signal_value
-        bearish_macd = macd_value < signal_value
+        bullish_macd = (
+            macd_value > signal_value
+        )
+
+        bearish_macd = (
+            macd_value < signal_value
+        )
 
         # CALL
         call_conditions = 0
@@ -185,12 +269,15 @@ def analyze_pair(pair_name, symbol):
         # ====================================================
 
         if call_conditions == 3:
+
             signal = "CALL"
 
         elif put_conditions == 3:
+
             signal = "PUT"
 
         else:
+
             signal = "WAIT"
 
         return {
@@ -208,7 +295,9 @@ def analyze_pair(pair_name, symbol):
 
     except Exception as e:
 
-        print(f"Analysis error for {pair_name}: {e}")
+        print(
+            f"Analysis error for {pair_name}: {e}"
+        )
 
         return {
             "pair": pair_name,
@@ -225,7 +314,10 @@ def print_result(result):
     pair = result["pair"]
     signal = result["signal"]
 
-    if signal in ["NO DATA", "ERROR"]:
+    if signal in [
+        "NO DATA",
+        "ERROR"
+    ]:
 
         print(
             f"{pair:<10} | {signal}"
@@ -241,6 +333,57 @@ def print_result(result):
         f"MACD {result['macd']:.5f} | "
         f"{signal}"
     )
+
+
+# ============================================================
+# BUILD TELEGRAM MESSAGE
+# ============================================================
+
+def build_telegram_message(signals):
+
+    now = datetime.now(
+        ZoneInfo("Asia/Baghdad")
+    )
+
+    message = (
+        "📊 FOREX SIGNAL PRO\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏱ Timeframe: {TIMEFRAME}\n\n"
+    )
+
+    if not signals:
+
+        message += "⏸ No complete signals this scan."
+
+        return message
+
+    message += "🚨 SIGNALS\n\n"
+
+    for result in signals:
+
+        if result["signal"] == "CALL":
+            icon = "🟢"
+        else:
+            icon = "🔴"
+
+        message += (
+            f"{icon} {result['pair']} → "
+            f"{result['signal']}\n"
+            f"RSI: {result['rsi']:.1f}\n"
+            f"EMA20: {result['ema20']:.5f}\n"
+            f"EMA50: {result['ema50']:.5f}\n"
+            f"MACD: {result['macd']:.5f}\n"
+            f"Score: "
+            f"{result['call_score'] if result['signal'] == 'CALL' else result['put_score']}/3\n\n"
+        )
+
+    message += (
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ Signal only — not financial advice."
+    )
+
+    return message
 
 
 # ============================================================
@@ -276,10 +419,14 @@ def scan_market():
 
         print_result(result)
 
-        if result["signal"] in ["CALL", "PUT"]:
+        if result["signal"] in [
+            "CALL",
+            "PUT"
+        ]:
+
             signals.append(result)
 
-        # Small delay to avoid sending requests too quickly
+        # Small delay to avoid requests too quickly
         time.sleep(1)
 
     print("-" * 75)
@@ -298,7 +445,21 @@ def scan_market():
 
     else:
 
-        print("No complete signal at this scan.")
+        print(
+            "No complete signal at this scan."
+        )
+
+    # ========================================================
+    # SEND TELEGRAM
+    # ========================================================
+
+    telegram_message = build_telegram_message(
+        signals
+    )
+
+    send_telegram(
+        telegram_message
+    )
 
     print("=" * 75)
 
@@ -315,6 +476,12 @@ def main():
     print("=" * 75)
     print(f"Timeframe: {TIMEFRAME}")
     print(f"Pairs: {len(PAIRS)}")
+    print(
+        "Telegram:",
+        "Enabled"
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+        else "NOT CONFIGURED"
+    )
     print("=" * 75)
 
     while True:
@@ -324,10 +491,14 @@ def main():
             scan_market()
 
             print()
-            print("Next scan in 5 minutes...")
+            print(
+                "Next scan in 5 minutes..."
+            )
             print()
 
-            time.sleep(SCAN_INTERVAL)
+            time.sleep(
+                SCAN_INTERVAL
+            )
 
         except KeyboardInterrupt:
 
@@ -338,8 +509,15 @@ def main():
         except Exception as e:
 
             print()
-            print("Unexpected error:", e)
-            print("Restarting in 30 seconds...")
+            print(
+                "Unexpected error:",
+                e
+            )
+
+            print(
+                "Restarting in 30 seconds..."
+            )
+
             time.sleep(30)
 
 
@@ -348,4 +526,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
