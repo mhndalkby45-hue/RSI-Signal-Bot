@@ -2,7 +2,9 @@ import requests
 import pandas as pd
 import time
 from datetime import datetime, timezone
-from ta.trend import MACD, ADXIndicator, EMAIndicator
+
+from ta.trend import MACD, EMAIndicator
+from ta.momentum import RSIIndicator
 
 
 # ============================================================
@@ -14,7 +16,12 @@ BOT_NAME = "Smart Trading Signal Bot"
 SYMBOL = "BTC-USD"
 GRANULARITY = 300       # 5 minutes
 
-ADX_MIN = 35
+# ============================================================
+# INDICATOR SETTINGS
+# ============================================================
+
+RSI_PERIOD = 14
+
 EMA_PERIOD = 50
 
 MACD_FAST = 12
@@ -22,23 +29,6 @@ MACD_SLOW = 26
 MACD_SIGNAL = 9
 
 POLL_SECONDS = 20
-
-# Expiry = 2 candles
-# 2 x 5 minutes = 10 minutes
-EXPIRY_CANDLES = 2
-
-
-# ============================================================
-# PAPER TRADING / TRADE LOG
-# ============================================================
-
-TRADE_LOG_FILE = "smart_trades.csv"
-
-pending_trade = None
-
-total_trades = 0
-wins = 0
-losses = 0
 
 
 # ============================================================
@@ -126,6 +116,21 @@ def calculate_indicators(df):
 
     df = df.copy()
 
+    # --------------------------------------------------------
+    # RSI 14
+    # --------------------------------------------------------
+
+    rsi = RSIIndicator(
+        close=df["close"],
+        window=RSI_PERIOD
+    )
+
+    df["rsi"] = rsi.rsi()
+
+    # --------------------------------------------------------
+    # MACD 12 / 26 / 9
+    # --------------------------------------------------------
+
     macd = MACD(
         close=df["close"],
         window_fast=MACD_FAST,
@@ -135,15 +140,11 @@ def calculate_indicators(df):
 
     df["macd"] = macd.macd()
     df["macd_signal"] = macd.macd_signal()
+    df["macd_histogram"] = macd.macd_diff()
 
-    adx = ADXIndicator(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        window=14
-    )
-
-    df["adx"] = adx.adx()
+    # --------------------------------------------------------
+    # EMA 50
+    # --------------------------------------------------------
 
     ema = EMAIndicator(
         close=df["close"],
@@ -164,71 +165,107 @@ def analyze_signal(df):
     if len(df) < 100:
         return None
 
+    # --------------------------------------------------------
     # Last completed candle
+    # --------------------------------------------------------
+
     current = df.iloc[-2]
     previous = df.iloc[-3]
 
-    if pd.isna(current["macd"]) or pd.isna(current["macd_signal"]):
-        return None
+    required_columns = [
+        "rsi",
+        "macd",
+        "macd_signal",
+        "ema50"
+    ]
 
-    if pd.isna(previous["macd"]) or pd.isna(previous["macd_signal"]):
-        return None
+    for column in required_columns:
 
-    if pd.isna(current["adx"]) or pd.isna(current["ema50"]):
-        return None
+        if pd.isna(current[column]):
+            return None
 
-    # MACD bullish cross
-    macd_cross = (
+        if pd.isna(previous[column]):
+            return None
+
+    # ========================================================
+    # MACD CROSS
+    # ========================================================
+
+    bullish_cross = (
         current["macd"] > current["macd_signal"]
         and
         previous["macd"] <= previous["macd_signal"]
     )
 
-    adx_ok = current["adx"] >= ADX_MIN
-
-    ema_ok = current["close"] > current["ema50"]
-
-    # ========================================================
-    # DIAGNOSTIC INFORMATION
-    # ========================================================
-
-    if not macd_cross:
-        return None
-
-    if not adx_ok:
-
-        print(
-            f"MACD CROSS detected | "
-            f"ADX {current['adx']:.2f} < {ADX_MIN} | "
-            f"Rejected"
-        )
-
-        return None
-
-    if not ema_ok:
-
-        print(
-            f"MACD CROSS + ADX OK | "
-            f"Price {current['close']:.2f} < "
-            f"EMA50 {current['ema50']:.2f} | "
-            f"Rejected"
-        )
-
-        return None
+    bearish_cross = (
+        current["macd"] < current["macd_signal"]
+        and
+        previous["macd"] >= previous["macd_signal"]
+    )
 
     # ========================================================
-    # VALID CALL SIGNAL
+    # CALL CONDITIONS
     # ========================================================
 
-    return {
-        "signal": "CALL",
-        "time": current["timestamp"],
-        "price": float(current["close"]),
-        "macd": float(current["macd"]),
-        "macd_signal": float(current["macd_signal"]),
-        "adx": float(current["adx"]),
-        "ema50": float(current["ema50"])
-    }
+    call_conditions = (
+        current["close"] > current["ema50"]
+        and
+        current["rsi"] > 50
+        and
+        current["rsi"] < 70
+        and
+        bullish_cross
+    )
+
+    if call_conditions:
+
+        return {
+            "direction": "CALL",
+            "time": current["timestamp"],
+            "price": float(current["close"]),
+            "rsi": float(current["rsi"]),
+            "macd": float(current["macd"]),
+            "macd_signal": float(
+                current["macd_signal"]
+            ),
+            "macd_histogram": float(
+                current["macd_histogram"]
+            ),
+            "ema50": float(current["ema50"])
+        }
+
+    # ========================================================
+    # PUT CONDITIONS
+    # ========================================================
+
+    put_conditions = (
+        current["close"] < current["ema50"]
+        and
+        current["rsi"] < 50
+        and
+        current["rsi"] > 30
+        and
+        bearish_cross
+    )
+
+    if put_conditions:
+
+        return {
+            "direction": "PUT",
+            "time": current["timestamp"],
+            "price": float(current["close"]),
+            "rsi": float(current["rsi"]),
+            "macd": float(current["macd"]),
+            "macd_signal": float(
+                current["macd_signal"]
+            ),
+            "macd_histogram": float(
+                current["macd_histogram"]
+            ),
+            "ema50": float(current["ema50"])
+        }
+
+    return None
 
 
 # ============================================================
@@ -237,233 +274,59 @@ def analyze_signal(df):
 
 def calculate_confidence(signal):
 
-    # MACD bullish cross
-    score = 40
+    score = 0
 
-    # ADX strength
-    adx = signal["adx"]
+    # --------------------------------------------------------
+    # EMA confirmation
+    # --------------------------------------------------------
 
-    if adx >= 45:
+    if signal["direction"] == "CALL":
 
-        score += 20
-
-    elif adx >= 40:
-
-        score += 15
-
-    elif adx >= 35:
-
-        score += 10
-
-    # Distance above EMA50
-    distance = (
-        (signal["price"] - signal["ema50"])
-        / signal["ema50"]
-    ) * 100
-
-    if distance >= 0.50:
-
-        score += 25
-
-    elif distance >= 0.20:
-
-        score += 20
-
-    elif distance > 0:
-
-        score += 15
-
-    # Maximum confidence = 100
-    return min(score, 100)
-
-
-# ============================================================
-# SAVE COMPLETED TRADE
-# ============================================================
-
-def save_trade(trade):
-
-    global total_trades
-    global wins
-    global losses
-
-    total_trades += 1
-
-    if trade["result"] == "WIN":
-
-        wins += 1
-
-    elif trade["result"] == "LOSS":
-
-        losses += 1
-
-    row = pd.DataFrame([trade])
-
-    try:
-
-        try:
-
-            existing = pd.read_csv(
-                TRADE_LOG_FILE
-            )
-
-            updated = pd.concat(
-                [existing, row],
-                ignore_index=True
-            )
-
-            updated.to_csv(
-                TRADE_LOG_FILE,
-                index=False
-            )
-
-        except FileNotFoundError:
-
-            row.to_csv(
-                TRADE_LOG_FILE,
-                index=False
-            )
-
-    except Exception as e:
-
-        print()
-        print("ERROR saving trade:")
-        print(str(e))
-
-    win_rate = (
-        (wins / total_trades) * 100
-        if total_trades > 0
-        else 0
-    )
-
-    print()
-    print("=" * 60)
-    print("PAPER TRADE RESULT")
-    print("=" * 60)
-
-    print(
-        "Direction:",
-        trade["direction"]
-    )
-
-    print(
-        "Entry:",
-        f"{trade['entry_price']:.2f}"
-    )
-
-    print(
-        "Exit:",
-        f"{trade['exit_price']:.2f}"
-    )
-
-    print(
-        "Change:",
-        f"{trade['price_change']:.2f}"
-    )
-
-    print()
-    print(
-        "RESULT:",
-        trade["result"]
-    )
-
-    print()
-    print(
-        "Total Trades:",
-        total_trades
-    )
-
-    print(
-        "Wins:",
-        wins
-    )
-
-    print(
-        "Losses:",
-        losses
-    )
-
-    print(
-        "Win Rate:",
-        f"{win_rate:.2f}%"
-    )
-
-    print("=" * 60)
-    print()
-
-
-# ============================================================
-# CHECK PENDING TRADE
-# ============================================================
-
-def check_pending_trade(df):
-
-    global pending_trade
-
-    if pending_trade is None:
-        return
-
-    current_candle = df.iloc[-2]
-
-    current_time = current_candle["timestamp"]
-
-    entry_time = pending_trade["entry_time"]
-
-    expiry_seconds = (
-        EXPIRY_CANDLES * GRANULARITY
-    )
-
-    elapsed = (
-        current_time - entry_time
-    ).total_seconds()
-
-    if elapsed < expiry_seconds:
-        return
-
-    exit_price = float(
-        current_candle["close"]
-    )
-
-    entry_price = pending_trade["entry_price"]
-
-    price_change = (
-        exit_price - entry_price
-    )
-
-    if exit_price > entry_price:
-
-        result = "WIN"
-
-    elif exit_price < entry_price:
-
-        result = "LOSS"
+        if signal["price"] > signal["ema50"]:
+            score += 30
 
     else:
 
-        result = "DRAW"
+        if signal["price"] < signal["ema50"]:
+            score += 30
 
-    trade = {
-        "entry_time": entry_time.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
-        "exit_time": current_time.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
-        "direction": "CALL",
-        "entry_price": entry_price,
-        "exit_price": exit_price,
-        "price_change": price_change,
-        "macd": pending_trade["macd"],
-        "macd_signal": pending_trade["macd_signal"],
-        "adx": pending_trade["adx"],
-        "ema50": pending_trade["ema50"],
-        "confidence": pending_trade["confidence"],
-        "result": result
-    }
+    # --------------------------------------------------------
+    # RSI confirmation
+    # --------------------------------------------------------
 
-    save_trade(trade)
+    rsi = signal["rsi"]
 
-    pending_trade = None
+    if signal["direction"] == "CALL":
+
+        if 55 <= rsi < 65:
+            score += 30
+
+        elif 50 < rsi < 70:
+            score += 25
+
+    else:
+
+        if 35 < rsi <= 45:
+            score += 30
+
+        elif 30 < rsi < 50:
+            score += 25
+
+    # --------------------------------------------------------
+    # MACD confirmation
+    # --------------------------------------------------------
+
+    if signal["direction"] == "CALL":
+
+        if signal["macd"] > signal["macd_signal"]:
+            score += 40
+
+    else:
+
+        if signal["macd"] < signal["macd_signal"]:
+            score += 40
+
+    return min(score, 100)
 
 
 # ============================================================
@@ -475,15 +338,27 @@ def print_signal(signal):
     confidence = calculate_confidence(signal)
 
     print()
-    print("=" * 60)
-    print("CALL SIGNAL")
-    print("=" * 60)
+    print("=" * 70)
+    print("🚨 VALID SIGNAL")
+    print("=" * 70)
 
     print(
-        "Time:",
+        "Signal time:",
         signal["time"].strftime(
             "%Y-%m-%d %H:%M:%S UTC"
         )
+    )
+
+    print(
+        "Entry:",
+        "NEXT 5-MINUTE CANDLE"
+    )
+
+    print()
+
+    print(
+        "Direction:",
+        signal["direction"]
     )
 
     print(
@@ -492,6 +367,11 @@ def print_signal(signal):
     )
 
     print()
+
+    print(
+        "RSI:",
+        f"{signal['rsi']:.2f}"
+    )
 
     print(
         "MACD:",
@@ -504,8 +384,8 @@ def print_signal(signal):
     )
 
     print(
-        "ADX:",
-        f"{signal['adx']:.2f}"
+        "MACD Histogram:",
+        f"{signal['macd_histogram']:.6f}"
     )
 
     print(
@@ -515,20 +395,37 @@ def print_signal(signal):
 
     print()
 
-    print("Direction: CALL")
-    print("Expiry: 10 minutes")
-
     print(
         "Confidence:",
         f"{confidence}%"
     )
 
-    print("=" * 60)
+    print()
+
+    print(
+        "Timeframe: 5 minutes"
+    )
+
+    print(
+        "Suggested expiry: 10 minutes"
+    )
+
+    print()
+
+    print(
+        "⚠️ MANUAL ENTRY"
+    )
+
+    print(
+        "The bot does NOT execute trades."
+    )
+
+    print("=" * 70)
     print()
 
 
 # ============================================================
-# WAITING MESSAGE
+# STATUS
 # ============================================================
 
 def print_status(df):
@@ -537,12 +434,22 @@ def print_status(df):
 
     now = datetime.now(timezone.utc)
 
+    if current["close"] > current["ema50"]:
+        trend = "ABOVE EMA50"
+    else:
+        trend = "BELOW EMA50"
+
+    if current["macd"] > current["macd_signal"]:
+        macd_state = "BULLISH"
+    else:
+        macd_state = "BEARISH"
+
     print(
         f"[{now.strftime('%H:%M:%S')} UTC] "
         f"BTC: {current['close']:.2f} | "
-        f"ADX: {current['adx']:.2f} | "
-        f"EMA50: "
-        f"{'ABOVE' if current['close'] > current['ema50'] else 'BELOW'} | "
+        f"RSI: {current['rsi']:.2f} | "
+        f"MACD: {macd_state} | "
+        f"{trend} | "
         f"Waiting..."
     )
 
@@ -553,52 +460,57 @@ def print_status(df):
 
 def main():
 
-    global pending_trade
-
     print()
-    print("=" * 60)
+    print("=" * 70)
     print(BOT_NAME)
-    print("=" * 60)
+    print("=" * 70)
 
     print(
-        "Symbol:",
-        SYMBOL
+        "Symbol: BTC-USD"
     )
 
     print(
         "Timeframe: 5 minutes"
     )
 
-    print("Strategy:")
-    print("MACD Bullish Cross")
-    print("ADX >= 35")
-    print("Price > EMA50")
+    print()
+
+    print("INDICATORS:")
+    print("RSI 14")
+    print("MACD 12 / 26 / 9")
+    print("EMA 50")
+
+    print()
+
+    print("SIGNAL RULES:")
+    print("CALL = Price > EMA50 + RSI 50-70 + Bullish MACD Cross")
+    print("PUT  = Price < EMA50 + RSI 30-50 + Bearish MACD Cross")
+
+    print()
 
     print(
-        "Direction: CALL only"
+        "Entry: NEXT CANDLE"
     )
 
     print(
         "Expiry: 10 minutes"
     )
 
+    print(
+        "Automatic trading: DISABLED"
+    )
+
+    print(
+        "Paper trading: DISABLED"
+    )
+
     print()
 
-    print("Starting bot...")
-
     print(
-        "The bot uses completed candles only."
+        "The bot analyzes completed candles only."
     )
 
-    print(
-        "Paper Trading: ENABLED"
-    )
-
-    print(
-        "No automatic trades are executed."
-    )
-
-    print("=" * 60)
+    print("=" * 70)
     print()
 
     last_checked_candle = None
@@ -631,28 +543,22 @@ def main():
                 completed_candle["timestamp"]
             )
 
-            # Only analyze when a new candle has completed.
-            if (
-                candle_time
-                != last_checked_candle
-            ):
+            # ------------------------------------------------
+            # Analyze only when a new candle closes
+            # ------------------------------------------------
 
-                last_checked_candle = (
-                    candle_time
-                )
+            if candle_time != last_checked_candle:
 
-                # Check existing paper trade
-                # before looking for a new signal.
-                check_pending_trade(df)
+                last_checked_candle = candle_time
 
                 print()
 
                 print(
-                    "-" * 60
+                    "-" * 70
                 )
 
                 print(
-                    "New completed candle:",
+                    "NEW COMPLETED CANDLE:",
                     candle_time.strftime(
                         "%Y-%m-%d %H:%M:%S UTC"
                     )
@@ -662,7 +568,6 @@ def main():
 
                 if signal is not None:
 
-                    # Prevent duplicate signal
                     if (
                         signal["time"]
                         != last_signal_candle
@@ -672,50 +577,8 @@ def main():
                             signal["time"]
                         )
 
-                        confidence = (
-                            calculate_confidence(
-                                signal
-                            )
-                        )
-
-                        signal["confidence"] = (
-                            confidence
-                        )
-
                         print_signal(
                             signal
-                        )
-
-                        # Start paper trade
-                        pending_trade = {
-                            "entry_time":
-                                signal["time"],
-
-                            "entry_price":
-                                signal["price"],
-
-                            "macd":
-                                signal["macd"],
-
-                            "macd_signal":
-                                signal[
-                                    "macd_signal"
-                                ],
-
-                            "adx":
-                                signal["adx"],
-
-                            "ema50":
-                                signal["ema50"],
-
-                            "confidence":
-                                confidence
-                        }
-
-                    else:
-
-                        print(
-                            "Signal already reported."
                         )
 
                 else:
