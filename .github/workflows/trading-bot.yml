@@ -27,4 +27,4 @@ steps:
 
   - name: Run Trading Bot
     run: |
-      python Smart-Trading-Bot-Final.py
+      python Smart-Trading-Bot-Final.pyy
