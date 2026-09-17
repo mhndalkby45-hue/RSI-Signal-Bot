@@ -23,5 +23,8 @@ jobs:
           pip install yfinance pandas ta requests
 
       - name: Run Forex Signal Pro
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python Forex-Signal-Pro.py
