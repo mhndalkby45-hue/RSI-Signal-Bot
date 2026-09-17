@@ -9,22 +9,69 @@ jobs:
 
     steps:
 
+      # =====================================================
+      # CHECKOUT REPOSITORY
+      # =====================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      # =====================================================
+      # SET UP PYTHON
+      # =====================================================
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+
+      # =====================================================
+      # INSTALL DEPENDENCIES
+      # =====================================================
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install yfinance pandas ta requests
+
+
+      # =====================================================
+      # CHECK TELEGRAM SETTINGS
+      # =====================================================
+
+      - name: Check Telegram configuration
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "Checking Telegram configuration..."
+
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "ERROR: TELEGRAM_BOT_TOKEN is missing"
+            exit 1
+          fi
+
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "ERROR: TELEGRAM_CHAT_ID is missing"
+            exit 1
+          fi
+
+          echo "Telegram secrets are configured."
+
+
+      # =====================================================
+      # RUN FOREX SIGNAL PRO
+      # =====================================================
 
       - name: Run Forex Signal Pro
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python Forex-Signal-Pro.py
+          echo "=============================================="
+          echo "Starting Forex Signal Pro..."
+          echo "=============================================="
+
+          python -u Forex-Signal-Pro.py
