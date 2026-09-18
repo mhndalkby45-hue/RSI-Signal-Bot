@@ -1,6 +1,6 @@
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -65,6 +65,7 @@ def send_telegram(message):
     }
 
     try:
+
         response = requests.post(
             url,
             json=payload,
@@ -79,12 +80,13 @@ def send_telegram(message):
         return False
 
     except Exception as e:
+
         print("Telegram error:", e)
         return False
 
 
 # ============================================================
-# ALLIGATOR CALCULATION
+# ALLIGATOR
 # ============================================================
 
 def calculate_alligator(df):
@@ -94,15 +96,32 @@ def calculate_alligator(df):
     # Teeth = SMA 8 shifted 5
     # Lips  = SMA 5 shifted 3
 
-    df["jaw"] = df["Close"].rolling(13).mean().shift(8)
-    df["teeth"] = df["Close"].rolling(8).mean().shift(5)
-    df["lips"] = df["Close"].rolling(5).mean().shift(3)
+    df["jaw"] = (
+        df["Close"]
+        .rolling(13)
+        .mean()
+        .shift(8)
+    )
+
+    df["teeth"] = (
+        df["Close"]
+        .rolling(8)
+        .mean()
+        .shift(5)
+    )
+
+    df["lips"] = (
+        df["Close"]
+        .rolling(5)
+        .mean()
+        .shift(3)
+    )
 
     return df
 
 
 # ============================================================
-# GET MARKET DATA
+# MARKET DATA
 # ============================================================
 
 def get_data(symbol):
@@ -120,13 +139,18 @@ def get_data(symbol):
         if df is None or df.empty:
             return None
 
-        # Handle yfinance multi-index columns
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        required = ["Open", "High", "Low", "Close"]
+        required = [
+            "Open",
+            "High",
+            "Low",
+            "Close"
+        ]
 
         for col in required:
+
             if col not in df.columns:
                 return None
 
@@ -152,7 +176,11 @@ def analyze_pair(pair_name, symbol):
     df = get_data(symbol)
 
     if df is None:
-        print(f"{pair_name:<10} | DATA ERROR")
+
+        print(
+            f"{pair_name:<10} | DATA ERROR"
+        )
+
         return None
 
     try:
@@ -171,10 +199,18 @@ def analyze_pair(pair_name, symbol):
         df = df.dropna()
 
         if len(df) < 10:
-            print(f"{pair_name:<10} | WAIT | Not enough data")
+
+            print(
+                f"{pair_name:<10} | WAIT"
+            )
+
             return None
 
-        # Use the latest COMPLETED candle
+        # ====================================================
+        # IMPORTANT
+        # Use LAST COMPLETED candle
+        # ====================================================
+
         row = df.iloc[-2]
 
         close_price = float(row["Close"])
@@ -186,7 +222,6 @@ def analyze_pair(pair_name, symbol):
         lips = float(row["lips"])
 
         signal = None
-        alligator_confirmed = False
 
         # ====================================================
         # CALL
@@ -200,7 +235,6 @@ def analyze_pair(pair_name, symbol):
         ):
 
             signal = "CALL"
-            alligator_confirmed = True
 
         # ====================================================
         # PUT
@@ -214,10 +248,9 @@ def analyze_pair(pair_name, symbol):
         ):
 
             signal = "PUT"
-            alligator_confirmed = True
 
         # ====================================================
-        # OUTPUT
+        # RESULT
         # ====================================================
 
         if signal:
@@ -247,25 +280,63 @@ def analyze_pair(pair_name, symbol):
 
     except Exception as e:
 
-        print(f"{pair_name:<10} | ERROR: {e}")
+        print(
+            f"{pair_name:<10} | ERROR: {e}"
+        )
+
         return None
 
 
 # ============================================================
-# BUILD TELEGRAM SIGNAL
+# NEXT 5-MINUTE CANDLE
 # ============================================================
 
-def build_signal_message(signals):
+def get_next_candle_time():
 
-    if not signals:
-        return None
-
-    # Iraq time
     now = datetime.now(
         ZoneInfo(TIMEZONE)
     )
 
-    entry_time = now.strftime("%H:%M")
+    # Find the next 5-minute boundary
+    minutes_to_add = 5 - (now.minute % 5)
+
+    if minutes_to_add == 5 and now.second == 0:
+        minutes_to_add = 0
+
+    next_time = (
+        now.replace(
+            second=0,
+            microsecond=0
+        )
+        + timedelta(minutes=minutes_to_add)
+    )
+
+    # If we are exactly on a boundary,
+    # the next candle starts now.
+    if (
+        now.minute % 5 == 0
+        and now.second == 0
+    ):
+
+        next_time = now.replace(
+            second=0,
+            microsecond=0
+        )
+
+    return next_time
+
+
+# ============================================================
+# TELEGRAM SIGNAL MESSAGE
+# ============================================================
+
+def build_signal_message(
+    signals,
+    entry_time
+):
+
+    if not signals:
+        return None
 
     message = (
         "🚨 FOREX SIGNAL PRO\n"
@@ -274,30 +345,32 @@ def build_signal_message(signals):
 
     for signal in signals:
 
-        emoji = (
-            "🟢"
-            if signal["signal"] == "CALL"
-            else "🔴"
-        )
+        if signal["signal"] == "CALL":
+            emoji = "🟢"
+        else:
+            emoji = "🔴"
 
         message += (
             f"{emoji} {signal['pair']} → "
             f"{signal['signal']}\n"
-            f"🕐 وقت الدخول: {entry_time}\n"
-            f"⏱️ مدة الصفقة: {ENTRY_DURATION} دقائق\n\n"
+            f"🕐 وقت الدخول: "
+            f"{entry_time.strftime('%H:%M')}\n"
+            f"⏱️ مدة الصفقة: "
+            f"{ENTRY_DURATION} دقائق\n\n"
         )
 
     message += (
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 Strategy: Alligator + RSI\n"
-        "⏰ Timeframe: 5m"
+        "📊 Alligator + RSI\n"
+        "⏰ Timeframe: 5m\n"
+        "➡️ الدخول مع بداية الشمعة التالية"
     )
 
     return message
 
 
 # ============================================================
-# STARTUP MESSAGE
+# STARTUP
 # ============================================================
 
 def send_startup_message():
@@ -309,8 +382,8 @@ def send_startup_message():
         "📊 Strategy: Alligator + RSI\n"
         "⏰ Timeframe: 5m\n"
         "⏱️ مدة الصفقة: 5 دقائق\n"
-        "🕐 التوقيت: العراق\n\n"
-        "📱 سيتم إرسال وقت الدخول مع كل إشارة."
+        "➡️ الدخول: بداية الشمعة التالية\n"
+        "🕐 التوقيت: العراق"
     )
 
     send_telegram(message)
@@ -326,15 +399,23 @@ def main():
     print("       FOREX SIGNAL PRO")
     print("       ALLIGATOR + RSI")
     print("==============================================")
+
     print(f"Timeframe: {TIMEFRAME}")
     print(f"Scan interval: {SCAN_INTERVAL} seconds")
     print(f"Entry duration: {ENTRY_DURATION} minutes")
     print("Strategy: Alligator + RSI")
+    print("Entry: NEXT 5-MINUTE CANDLE")
 
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+    if (
+        TELEGRAM_BOT_TOKEN
+        and TELEGRAM_CHAT_ID
+    ):
+
         print("Telegram: Enabled")
         send_startup_message()
+
     else:
+
         print("Telegram: NOT CONFIGURED")
 
     print("==============================================")
@@ -367,28 +448,37 @@ def main():
                 signals.append(result)
 
         # ====================================================
-        # TELEGRAM
+        # SEND SIGNAL
         # ====================================================
 
         if signals:
 
+            next_candle = get_next_candle_time()
+
             message = build_signal_message(
-                signals
+                signals,
+                next_candle
             )
 
             send_telegram(message)
+
+            print(
+                f"Next candle entry: "
+                f"{next_candle.strftime('%H:%M')}"
+            )
 
         else:
 
             print("No confirmed signals.")
 
         # ====================================================
-        # WAIT
+        # NEXT SCAN
         # ====================================================
 
         print("==============================================")
         print(
-            f"Next scan in {SCAN_INTERVAL} seconds..."
+            f"Next scan in "
+            f"{SCAN_INTERVAL} seconds..."
         )
         print("==============================================")
 
