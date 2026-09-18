@@ -7,12 +7,10 @@ import pandas as pd
 import yfinance as yf
 import requests
 
-from ta.trend import EMAIndicator, MACD
-from ta.momentum import RSIIndicator
-
 
 # ============================================================
 # FOREX SIGNAL PRO
+# ALLIGATOR + RSI
 # ============================================================
 
 BOT_NAME = "Forex Signal Pro"
@@ -25,6 +23,7 @@ ENTRY_DURATION = 5  # minutes
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 
 PAIRS = {
     "EUR/USD": "EURUSD=X",
@@ -42,6 +41,7 @@ PAIRS = {
 # ============================================================
 
 def send_telegram(message):
+
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram: Disabled")
         return False
@@ -54,6 +54,7 @@ def send_telegram(message):
     }
 
     try:
+
         response = requests.post(
             url,
             json=payload,
@@ -68,6 +69,7 @@ def send_telegram(message):
         return False
 
     except Exception as e:
+
         print("Telegram connection error:", e)
         return False
 
@@ -77,16 +79,15 @@ def send_telegram(message):
 # ============================================================
 
 def get_entry_time():
-    """
-    يقترح أقرب بداية شمعة 5 دقائق قادمة
-    بعد وقت ظهور الإشارة.
-    """
 
-    now = datetime.now(ZoneInfo("Asia/Baghdad"))
+    now = datetime.now(
+        ZoneInfo("Asia/Baghdad")
+    )
 
     next_minute = ((now.minute // 5) + 1) * 5
 
     if next_minute >= 60:
+
         entry_time = (
             now.replace(
                 minute=0,
@@ -95,7 +96,9 @@ def get_entry_time():
             )
             + timedelta(hours=1)
         )
+
     else:
+
         entry_time = now.replace(
             minute=next_minute,
             second=0,
@@ -124,15 +127,12 @@ def get_data(symbol):
         if data is None or data.empty:
             return None
 
-        # التعامل مع MultiIndex في بعض إصدارات yfinance
+        # Handle MultiIndex
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
 
-        required_columns = ["Close"]
-
-        for column in required_columns:
-            if column not in data.columns:
-                return None
+        if "Close" not in data.columns:
+            return None
 
         data = data.dropna()
 
@@ -149,6 +149,69 @@ def get_data(symbol):
 
 
 # ============================================================
+# ALLIGATOR CALCULATION
+# ============================================================
+
+def calculate_alligator(close):
+
+    # Williams Alligator
+    #
+    # Jaw   = SMMA 13
+    # Teeth = SMMA 8
+    # Lips  = SMMA 5
+    #
+    # For signal direction we compare the three lines
+    # on the latest completed candle.
+
+    jaw = close.ewm(
+        alpha=1 / 13,
+        adjust=False
+    ).mean()
+
+    teeth = close.ewm(
+        alpha=1 / 8,
+        adjust=False
+    ).mean()
+
+    lips = close.ewm(
+        alpha=1 / 5,
+        adjust=False
+    ).mean()
+
+    return jaw, teeth, lips
+
+
+# ============================================================
+# RSI CALCULATION
+# ============================================================
+
+def calculate_rsi(close, period=14):
+
+    delta = close.diff()
+
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.ewm(
+        alpha=1 / period,
+        adjust=False
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1 / period,
+        adjust=False
+    ).mean()
+
+    rs = avg_gain / avg_loss.replace(0, float("nan"))
+
+    rsi = 100 - (
+        100 / (1 + rs)
+    )
+
+    return rsi
+
+
+# ============================================================
 # ANALYZE PAIR
 # ============================================================
 
@@ -157,7 +220,11 @@ def analyze_pair(pair_name, symbol):
     data = get_data(symbol)
 
     if data is None:
-        print(f"{pair_name:<10} | No data")
+
+        print(
+            f"{pair_name:<10} | No data"
+        )
+
         return None
 
     try:
@@ -168,90 +235,62 @@ def analyze_pair(pair_name, symbol):
         # INDICATORS
         # ====================================================
 
-        ema20 = EMAIndicator(
-            close=close,
-            window=20
-        ).ema_indicator()
+        jaw, teeth, lips = calculate_alligator(close)
 
-        ema50 = EMAIndicator(
-            close=close,
-            window=50
-        ).ema_indicator()
-
-        rsi = RSIIndicator(
-            close=close,
-            window=14
-        ).rsi()
-
-        macd_indicator = MACD(
-            close=close,
-            window_fast=12,
-            window_slow=26,
-            window_sign=9
+        rsi = calculate_rsi(
+            close,
+            period=14
         )
 
-        macd_line = macd_indicator.macd()
-        macd_signal = macd_indicator.macd_signal()
-
         # ====================================================
-        # آخر شمعة مكتملة
+        # LAST COMPLETED CANDLE
         # ====================================================
 
         latest = -2
 
-        price = float(close.iloc[latest])
-        ema20_value = float(ema20.iloc[latest])
-        ema50_value = float(ema50.iloc[latest])
-        rsi_value = float(rsi.iloc[latest])
-        macd_value = float(macd_line.iloc[latest])
-        macd_signal_value = float(macd_signal.iloc[latest])
-
-        # ====================================================
-        # CONDITIONS
-        # ====================================================
-
-        bullish_ema = (
-            price > ema20_value
-            and ema20_value > ema50_value
+        price = float(
+            close.iloc[latest]
         )
 
-        bearish_ema = (
-            price < ema20_value
-            and ema20_value < ema50_value
+        jaw_value = float(
+            jaw.iloc[latest]
         )
 
-        bullish_macd = (
-            macd_value > macd_signal_value
+        teeth_value = float(
+            teeth.iloc[latest]
         )
 
-        bearish_macd = (
-            macd_value < macd_signal_value
+        lips_value = float(
+            lips.iloc[latest]
+        )
+
+        rsi_value = float(
+            rsi.iloc[latest]
         )
 
         # ====================================================
-        # SCORE
+        # ALLIGATOR DIRECTION
         # ====================================================
 
-        call_score = 0
-        put_score = 0
+        bullish_alligator = (
+            lips_value > teeth_value
+            and teeth_value > jaw_value
+            and price > lips_value
+        )
 
-        if bullish_ema:
-            call_score += 1
+        bearish_alligator = (
+            lips_value < teeth_value
+            and teeth_value < jaw_value
+            and price < lips_value
+        )
 
-        if rsi_value > 50:
-            call_score += 1
+        # ====================================================
+        # RSI CONFIRMATION
+        # ====================================================
 
-        if bullish_macd:
-            call_score += 1
+        bullish_rsi = rsi_value >= 55
 
-        if bearish_ema:
-            put_score += 1
-
-        if rsi_value < 50:
-            put_score += 1
-
-        if bearish_macd:
-            put_score += 1
+        bearish_rsi = rsi_value <= 45
 
         # ====================================================
         # SIGNAL
@@ -259,10 +298,12 @@ def analyze_pair(pair_name, symbol):
 
         signal = None
 
-        if call_score == 3:
+        if bullish_alligator and bullish_rsi:
+
             signal = "CALL"
 
-        elif put_score == 3:
+        elif bearish_alligator and bearish_rsi:
+
             signal = "PUT"
 
         # ====================================================
@@ -275,7 +316,7 @@ def analyze_pair(pair_name, symbol):
                 f"{pair_name:<10} | "
                 f"{signal:<4} | "
                 f"RSI {rsi_value:.1f} | "
-                f"Score 3/3"
+                f"Alligator CONFIRMED"
             )
 
         else:
@@ -289,14 +330,14 @@ def analyze_pair(pair_name, symbol):
         return {
             "pair": pair_name,
             "signal": signal,
-            "rsi": rsi_value,
-            "call_score": call_score,
-            "put_score": put_score
+            "rsi": rsi_value
         }
 
     except Exception as e:
 
-        print(f"Analysis error {pair_name}: {e}")
+        print(
+            f"Analysis error {pair_name}: {e}"
+        )
 
         return None
 
@@ -329,8 +370,10 @@ def build_telegram_message(signals):
 
         message += (
             f"{emoji} {pair} → {direction}\n"
-            f"🕐 وقت الدخول: {entry_time.strftime('%H:%M')}\n"
-            f"⏳ مدة الصفقة: {ENTRY_DURATION} دقائق\n\n"
+            f"🕐 وقت الدخول: "
+            f"{entry_time.strftime('%H:%M')}\n"
+            f"⏳ مدة الصفقة: "
+            f"{ENTRY_DURATION} دقائق\n\n"
         )
 
     message += (
@@ -371,16 +414,25 @@ def scan_market():
 
     if signals:
 
-        message = build_telegram_message(signals)
+        message = build_telegram_message(
+            signals
+        )
 
         if message:
-            send_telegram(message)
+
+            send_telegram(
+                message
+            )
 
     else:
 
-        print("No complete signals.")
+        print(
+            "No complete signals."
+        )
 
-    print("==============================================")
+    print(
+        "=============================================="
+    )
 
 
 # ============================================================
@@ -392,26 +444,53 @@ def startup():
     print()
     print("==============================================")
     print("       FOREX SIGNAL PRO")
+    print("       ALLIGATOR + RSI")
     print("==============================================")
-    print(f"Timeframe: {TIMEFRAME}")
-    print(f"Scan interval: {SCAN_INTERVAL} seconds")
-    print(f"Entry duration: {ENTRY_DURATION} minutes")
 
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        print("Telegram: Enabled")
+    print(
+        f"Timeframe: {TIMEFRAME}"
+    )
+
+    print(
+        f"Scan interval: {SCAN_INTERVAL} seconds"
+    )
+
+    print(
+        f"Entry duration: {ENTRY_DURATION} minutes"
+    )
+
+    print(
+        "Strategy: Alligator + RSI"
+    )
+
+    if (
+        TELEGRAM_BOT_TOKEN
+        and TELEGRAM_CHAT_ID
+    ):
+
+        print(
+            "Telegram: Enabled"
+        )
 
         send_telegram(
             "🚀 FOREX SIGNAL PRO\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "✅ البوت يعمل الآن\n"
+            "📊 Strategy: Alligator + RSI\n"
             "⏱ Timeframe: 5m\n"
             "⏳ مدة الصفقة المقترحة: 5 دقائق"
         )
 
     else:
-        print("Telegram: Disabled")
 
-    print("==============================================")
+        print(
+            "Telegram: Disabled"
+        )
+
+    print(
+        "=============================================="
+    )
+
     print()
 
 
@@ -439,22 +518,33 @@ def main():
             scan_market()
 
             print(
-                f"Next scan in {SCAN_INTERVAL} seconds..."
+                f"Next scan in "
+                f"{SCAN_INTERVAL} seconds..."
             )
 
-            time.sleep(SCAN_INTERVAL)
+            time.sleep(
+                SCAN_INTERVAL
+            )
 
         except KeyboardInterrupt:
 
             print()
-            print("Bot stopped.")
+            print(
+                "Bot stopped."
+            )
+
             break
 
         except Exception as e:
 
-            print("Main loop error:", e)
+            print(
+                "Main loop error:",
+                e
+            )
 
-            print("Retrying in 30 seconds...")
+            print(
+                "Retrying in 30 seconds..."
+            )
 
             time.sleep(30)
 
@@ -464,4 +554,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
